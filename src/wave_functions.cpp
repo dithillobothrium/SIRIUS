@@ -99,41 +99,152 @@ void Wave_functions<false>::inner(int i0__, int m__, Wave_functions& ket__, int 
         linalg<CPU>::gemm(2, 0, m__, n__, num_gvec_loc(), &wf_coeffs_(0, i0__), num_gvec_loc(),
                           &ket__(0, j0__), num_gvec_loc(), &result__(irow__, icol__), result__.ld());
     }
-    else
+    else /* parallel or GPU */
     {
+        /* block size to split <ket| states */
+        int bs = 256;
+        /* number of blocks of <ket| states */
+        int nb = m__ / bs + std::min(m__ % bs, 1);
         /* reallocate buffer if necessary */
-        if (static_cast<size_t>(m__ * n__) > inner_prod_buf_.size())
+        if (static_cast<size_t>(2 * bs * n__) > inner_prod_buf_.size())
         {
-            inner_prod_buf_ = mdarray<double_complex, 1>(m__ * n__);
+            inner_prod_buf_ = mdarray<double_complex, 1>(2 * bs * n__);
             #ifdef __GPU
             if (pu_ == GPU) inner_prod_buf_.allocate_on_device();
             #endif
         }
-        switch (pu_)
+
+        double t0 = -omp_get_wtime();
+        
+        /* state of the buffers:
+         * state = 0: buffer is free
+         * state = 1: buffer stores result of local zgemm */
+        int buf_state[] = {0, 0};
+
+        omp_set_nested(1);
+        int nt = omp_get_max_threads();
+        if (nt < 2) TERMINATE("minimum two threads are required");
+        #pragma omp parallel num_threads(2)
         {
-            case CPU:
+            if (omp_get_thread_num() == 0)
             {
-                linalg<CPU>::gemm(2, 0, m__, n__, num_gvec_loc(), &wf_coeffs_(0, i0__), num_gvec_loc(),
-                                  &ket__(0, j0__), num_gvec_loc(), &inner_prod_buf_[0], m__);
-                break;
+                /* compute threads */
+                omp_set_num_threads(nt - 1);
+                for (int ib = 0; ib < nb; ib++)
+                {
+                    int is = ib % 2;
+                    /* current block size */
+                    int ibs = ((ib + 1) * bs > m__) ? m__ - ib * bs : bs;
+                    /* wait for the release of the buffer */
+                    while (true)
+                    {
+                        int st;
+                        #pragma omp critical
+                        st = buf_state[is];
+                        if (st == 0) break;
+                    }
+                    switch (pu_)
+                    {
+                        case CPU:
+                        {
+                            /* perform local matrix multiplication */
+                            linalg<CPU>::gemm(2, 0, ibs, n__, num_gvec_loc(), &wf_coeffs_(0, i0__ + ib * bs), num_gvec_loc(),
+                                              &ket__(0, j0__), num_gvec_loc(), &inner_prod_buf_[is * bs * n__], ibs);
+                            break;
+                        }
+                        case GPU:
+                        {
+                            #ifdef __GPU
+                            linalg<GPU>::gemm(2, 0, ibs, n__, num_gvec_loc(), wf_coeffs_.at<GPU>(0, i0__ + ib * bs), num_gvec_loc(),
+                                              ket__.wf_coeffs_.at<GPU>(0, j0__), num_gvec_loc(), inner_prod_buf_.at<GPU>(is * bs * n__), ibs);
+                            acc::copyout(inner_prod_buf_.at<CPU>(is * bs * n__), inner_prod_buf_.at<GPU>(is * bs * n__), ibs * n__);
+                            #else
+                            TERMINATE_NO_GPU
+                            #endif
+                        }
+                    }
+                    /* lock the buffer */
+                    #pragma omp critical
+                    buf_state[is] = 1;
+                }
             }
-            case GPU:
+            else
             {
-                #ifdef __GPU
-                linalg<GPU>::gemm(2, 0, m__, n__, num_gvec_loc(), wf_coeffs_.at<GPU>(0, i0__), num_gvec_loc(),
-                                  ket__.wf_coeffs_.at<GPU>(0, j0__), num_gvec_loc(), inner_prod_buf_.at<GPU>(), m__);
-                inner_prod_buf_.copy_to_host(m__ * n__);
-                #else
-                TERMINATE_NO_GPU
-                #endif
-                break;
+                for (int ib = 0; ib < nb; ib++)
+                {
+                    int is = ib % 2;
+                    /* current block size */
+                    int ibs = ((ib + 1) * bs > m__) ? m__ - ib * bs : bs;
+                    /* wait for data */
+                    while (true)
+                    {
+                        int st;
+                        #pragma omp critical
+                        st = buf_state[is];
+                        if (st == 1) break;
+                    }
+                    /* sum from all ranks */
+                    mpi_grid_.communicator().allreduce(&inner_prod_buf_[is * bs * n__], ibs * n__);
+                    /* save result */
+                    for (int i = 0; i < n__; i++)
+                    {
+                        std::memcpy(&result__(irow__ + ib * bs, icol__ + i),
+                                    &inner_prod_buf_[is * bs * n__ + i * ibs],
+                                    ibs * sizeof(double_complex));
+                    }
+                    /* release the buffer */
+                    #pragma omp critical
+                    buf_state[is] = 0;
+                }
             }
         }
+        omp_set_nested(0);
 
-        if (mpi_grid_.size() > 1) mpi_grid_.communicator().allreduce(&inner_prod_buf_[0], m__ * n__);
+        t0 += omp_get_wtime();
+        PRINT("[wf:inner] zgemm performance: %f GFlops", 8e-9 * m__ * n__ * gvec_.num_gvec() / t0);
 
-        for (int i = 0; i < n__; i++)
-            std::memcpy(&result__(irow__, icol__ + i), &inner_prod_buf_[i * m__], m__ * sizeof(double_complex));
+
+
+            
+
+
+
+
+
+
+        ///* reallocate buffer if necessary */
+        //if (static_cast<size_t>(m__ * n__) > inner_prod_buf_.size())
+        //{
+        //    inner_prod_buf_ = mdarray<double_complex, 1>(m__ * n__);
+        //    #ifdef __GPU
+        //    if (pu_ == GPU) inner_prod_buf_.allocate_on_device();
+        //    #endif
+        //}
+        //switch (pu_)
+        //{
+        //    case CPU:
+        //    {
+        //        linalg<CPU>::gemm(2, 0, m__, n__, num_gvec_loc(), &wf_coeffs_(0, i0__), num_gvec_loc(),
+        //                          &ket__(0, j0__), num_gvec_loc(), &inner_prod_buf_[0], m__);
+        //        break;
+        //    }
+        //    case GPU:
+        //    {
+        //        #ifdef __GPU
+        //        linalg<GPU>::gemm(2, 0, m__, n__, num_gvec_loc(), wf_coeffs_.at<GPU>(0, i0__), num_gvec_loc(),
+        //                          ket__.wf_coeffs_.at<GPU>(0, j0__), num_gvec_loc(), inner_prod_buf_.at<GPU>(), m__);
+        //        inner_prod_buf_.copy_to_host(m__ * n__);
+        //        #else
+        //        TERMINATE_NO_GPU
+        //        #endif
+        //        break;
+        //    }
+        //}
+
+        //if (mpi_grid_.size() > 1) mpi_grid_.communicator().allreduce(&inner_prod_buf_[0], m__ * n__);
+
+        //for (int i = 0; i < n__; i++)
+        //    std::memcpy(&result__(irow__, icol__ + i), &inner_prod_buf_[i * m__], m__ * sizeof(double_complex));
     }
 }
 
