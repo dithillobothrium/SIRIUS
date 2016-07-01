@@ -64,8 +64,8 @@ Step_function::Step_function(Unit_cell             const& unit_cell__,
         WARNING(s);
     }
     #ifdef __PRINT_OBJECT_CHECKSUM
-    double_complex z1 = mdarray<double_complex, 1>(&step_function_pw_[0], fft_->size()).checksum();
-    double d1 = mdarray<double, 1>(&step_function_[0], fft_->size()).checksum();
+    double_complex z1 = mdarray<double_complex, 1>(&step_function_pw_[0], fft__->size()).checksum();
+    double d1 = mdarray<double, 1>(&step_function_[0], fft__->size()).checksum();
     DUMP("checksum(step_function): %18.10f", d1);
     DUMP("checksum(step_function_pw): %18.10f %18.10f", std::real(z1), std::imag(z1));
     #endif
