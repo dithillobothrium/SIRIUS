@@ -329,6 +329,23 @@ void Potential::calc_PAW_local_potential(int atom_index,
 
 	paw_hartree_energies_[atom_index] = ae_hartree_energy - ps_hartree_energy;
 
+	//////////////////////////////////////////////////////////////////
+	    std::stringstream s;
+	    s<<"atom_vh"<<atom_index<<".dat";
+
+	    std::ofstream ofxc(s.str());
+
+	    for(int ib2 = 0; ib2 < ae_paw_local_potential_[atom_index].size(0) ; ib2++)
+	    {
+	        for(int ib1 = 0; ib1 < ae_paw_local_potential_[atom_index].size(1) ; ib1++)
+	        {
+	            ofxc<< ae_paw_local_potential_[atom_index](ib2,ib1,0) <<" " <<  ps_paw_local_potential_[atom_index](ib2,ib1,0) <<  std::endl;
+	        }
+	    }
+
+	    ofxc.close();
+	    //////////////////////////////////////////////////////////////////
+
 	//-----------------------------------------
 	//---- Calculation of XC potential ---
 	//-----------------------------------------
@@ -376,6 +393,23 @@ void Potential::calc_PAW_local_potential(int atom_index,
 	////////////////////////////////////////////////////////////////
 
 	paw_xc_energies_[atom_index] = ae_xc_energy - ps_xc_energy;
+
+	//////////////////////////////////////////////////////////////////
+    std::stringstream s2;
+    s2<<"atom_vh_xc"<<atom_index<<".dat";
+
+    std::ofstream ofxc2(s2.str());
+
+    for(int ib2 = 0; ib2 < ae_paw_local_potential_[atom_index].size(0) ; ib2++)
+    {
+        for(int ib1 = 0; ib1 < ae_paw_local_potential_[atom_index].size(1) ; ib1++)
+        {
+            ofxc2<< ae_paw_local_potential_[atom_index](ib2,ib1,0) <<" " <<  ps_paw_local_potential_[atom_index](ib2,ib1,0) <<  std::endl;
+        }
+    }
+
+    ofxc2.close();
+    //////////////////////////////////////////////////////////////////
 }
 
 
@@ -503,20 +537,27 @@ void Potential::calc_PAW_local_Dij(int atom_index)
 //	}
 //	std::cout <<std::endl;
 //	std::cout<<std::endl;
-	//////////////////////////////////////////////////////////////////
-	//	std::ofstream ofxc("atom_dij.dat");
-	//
-	//	for(int ib2 = 0; ib2 < (int)atom_type.mt_lo_basis_size(); ib2++)
-	//	{
-	//		for(int ib1 = 0; ib1 < (int)atom_type.mt_lo_basis_size(); ib1++)
-	//		{
-	//			ofxc<< atom.d_mtrx(ib1,ib2,0).real() << std::endl;
-	//		}
-	//	}
-	//
-	//	ofxc.close();
+
 	//////////////////////////////////////////////////////////////////
 
+	        std::stringstream s;
+	        s<<"atom_dij"<<atom_index<<".dat";
+
+	        std::ofstream ofxc(s.str());
+
+	        for(int ib2 = 0; ib2 < (int)atom_type.mt_lo_basis_size(); ib2++)
+	        {
+	            for(int ib1 = 0; ib1 < (int)atom_type.mt_lo_basis_size(); ib1++)
+	            {
+	                ofxc<< atom.d_mtrx(ib1,ib2,0).real() << std::endl;
+	            }
+	        }
+
+	        ofxc.close();
+
+
+
+	        //////////////////////////////////////////////////////////////////
 	//	TERMINATE("ololo");
 }
 

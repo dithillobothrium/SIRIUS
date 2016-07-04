@@ -10,7 +10,7 @@
 
     "iterative_solver" : {
         "energy_tolerance" : 1e-12,
-        "residual_tolerance" : 1e-6,
+        "residual_tolerance" : 1e-10,
         "num_steps" : 20,
         "subspace_size" : 4,
         "type" : "davidson",
@@ -21,14 +21,14 @@
 
     "use_symmetry" : 1,
 
-    "num_mag_dims" : 1,
+    "num_mag_dims" : 0,
 
     "gk_cutoff" : 5.0,
     "pw_cutoff" : 20.00,
 
     "energy_tol" : 1e-8,
 
-    "num_dft_iter" : 2,
+    "num_dft_iter" : 100,
 
     "ngridk" : [8,8,8],
 
