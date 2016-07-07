@@ -523,6 +523,7 @@ void Density::initialize_beta_density_matrix()
 
 		const std::vector<double> &occupations = atom_type.get_PAW_descriptor().occupations;
 
+
 		#pragma omp parallel for
 		for (int i = 0; i < atom_type.num_atoms(); i++)
 		{

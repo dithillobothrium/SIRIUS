@@ -1,4 +1,5 @@
 #include "density.h"
+#include <fstream>
 
 namespace sirius {
 
@@ -44,6 +45,9 @@ void Density::generate_valence(K_set& ks__)
             }
         }
     }
+
+
+
 
     /* zero density and magnetization */
     zero();
@@ -96,13 +100,31 @@ void Density::generate_valence(K_set& ks__)
 
     ctx_.fft().dismiss();
 
-    if (ctx_.esm_type() == ultrasoft_pseudopotential || ctx_.esm_type() == paw_pseudopotential)
+    if (ctx_.esm_type() == ultrasoft_pseudopotential)
 	{
-    	augment(ks__);
+
 	}
 
     if (ctx_.esm_type() == paw_pseudopotential)
     {
+        augment(ks__);
+
+        std::cout<<"dm out"<<std::endl;
+        for(int ia=0;ia<unit_cell_.num_atoms(); ia++)
+        {
+            std::stringstream s2;
+            s2<<"dm_unsym"<<ia<<".dat";
+            std::ofstream of2(s2.str());
+
+            for(int i=0;i<density_matrix_.size(1);i++)
+                for(int j=0;j<density_matrix_.size(0);j++)
+                    of2<<density_matrix_(j,i,0,ia).real()<<" ";
+
+            of2.close();
+        }
+
+        symmetrize_density_matrix();
+
     	generate_paw_loc_density();
     }
 }

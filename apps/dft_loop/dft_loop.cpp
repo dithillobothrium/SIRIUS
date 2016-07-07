@@ -8,7 +8,7 @@ void write_json_output(Simulation_context& ctx, DFT_ground_state& gs)
     //double evalsum2 = gs.core_eval_sum();
     //double ekin = gs.energy_kin();
     double evxc = gs.energy_vxc();
-    double eexc = gs.energy_exc();
+    double eexc = gs.energy_exc(); 
     //double ebxc = gs.energy_bxc();
     double evha = gs.energy_vha();
     double etot = gs.total_energy();

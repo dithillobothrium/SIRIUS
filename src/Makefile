@@ -23,6 +23,7 @@ SRC =  LebedevLaikov.cpp linalg.cpp utils.cpp radial_grid.cpp \
        Unit_cell/make_periodic_function.cpp \
        Density/density.cpp \
        Density/initial_density.cpp \
+       Density/symmetrize_density_matrix.cpp\
        Density/add_k_point_contribution.cpp \
        Density/add_k_point_contribution_rg.cpp \
        Density/generate_rho_radial_integrals.cpp \

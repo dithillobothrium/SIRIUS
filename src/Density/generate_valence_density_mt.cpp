@@ -200,6 +200,7 @@ void Density::generate_paw_loc_density()
 //	ofstream of("loc_density.txt");
 	//of<<"========================================"<<endl;
 
+
 	for(int ia = 0; ia < unit_cell_.num_atoms(); ia++)
 	{
 		auto& atom = unit_cell_.atom(ia);
@@ -256,6 +257,8 @@ void Density::generate_paw_loc_density()
 					int irb2 = atom_type.indexb(ib2).idxrf;
 					int irb1 = atom_type.indexb(ib1).idxrf;
 
+                    double diag_coef = ib1 == ib2 ? 1. : 2. ;
+
 					// index to iterate Qij,
 					// TODO check indices
 					int iqij = irb2 * (irb2 + 1) / 2 + irb1;
@@ -279,7 +282,7 @@ void Density::generate_paw_loc_density()
 						for(int irad = 0; irad < (int)grid.num_points(); irad++)
 						{
 							// we need to divide density over r^2 since wave functions are stored multiplied by r
-							double inv_r2 = 1./(grid[irad] * grid[irad]);
+							double inv_r2 = diag_coef/(grid[irad] * grid[irad]);
 
 							// TODO for 3 spin dimensions 3th density spin component must be complex
 							// replace order of indices for density from {irad,lm} to {lm,irad}
@@ -330,18 +333,32 @@ void Density::generate_paw_loc_density()
 //		}
 
 
-//		ofstream of("loc_density.txt");
-//
-//
-//
-//			std::cout <<" DM "<<std::endl;
-//			for(int i=0;i<density_matrix_.size(1);i++)
-//				for(int j=0;j<density_matrix_.size(0);j++)
-//					std::cout<<density_matrix_(j,i,1,ia)-density_matrix_(j,i,0,ia)<<" ";
-//			std::cout <<std::endl;
-//
-//
-//		of.close();
+            std::stringstream s2;
+            s2<<"dm"<<ia<<".dat";
+            ofstream of2(s2.str());
+
+            for(int i=0;i<density_matrix_.size(1);i++)
+                for(int j=0;j<density_matrix_.size(0);j++)
+                    of2<<density_matrix_(j,i,0,ia).real()<<" ";
+
+            of2.close();
+
+
+
+
+			std::stringstream s;
+			s<<"density"<<ia<<".dat";
+	        ofstream of(s.str());
+
+	        for(int j = 0; j< ae_atom_density.size(0); j++)
+	        {
+	            for(int i = 0; i< ae_atom_density.size(1); i++)
+	            {
+	                of<< ae_atom_density(j,i) << " " << ps_atom_density(j,i) << endl;
+	            }
+	        }
+
+	        of.close();
 
 
 	}

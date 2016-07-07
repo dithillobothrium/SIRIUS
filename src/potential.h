@@ -109,6 +109,10 @@ class Potential
         double paw_xc_total_energy_;
         double paw_total_core_energy_;
 
+        std::vector<mdarray<double_complex,3>> paw_dij_;
+
+        int ndm_;
+
         //--- PAW  functions ---
 		void init_PAW();
 
@@ -140,6 +144,7 @@ class Potential
 											 mdarray<double, 2> &full_density,
 											 mdarray<double, 3> &out_atom_pot);
 
+		void symmetrize_PAW_Dij_matrix();
 		//------------------------------------------------
 		//------------------------------------------------
         //Spheric_function<function_domain_t::spectral,double>
@@ -475,6 +480,8 @@ class Potential
         double PAW_xc_total_energy(){ return paw_xc_total_energy_; }
 
         double PAW_total_core_energy(){ return paw_total_core_energy_; }
+
+
         //------------------------------------------------
         //------------------------------------------------
 

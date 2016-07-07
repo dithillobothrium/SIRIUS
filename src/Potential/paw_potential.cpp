@@ -17,6 +17,14 @@ void Potential::init_PAW()
 	paw_xc_energies_.resize(unit_cell_.num_atoms());
 	paw_core_energies_.resize(unit_cell_.num_atoms());
 
+	paw_dij_ = std::vector< mdarray<double_complex,3> >();
+
+	ndm_ = std::max(ctx_.num_mag_dims(), ctx_.num_spins());
+
+//	(unit_cell_.max_mt_basis_size(),
+//	                                     unit_cell_.max_mt_basis_size(),
+//	                                     ndm, unit_cell_.num_atoms());
+
 	for(int ia = 0; ia < unit_cell_.num_atoms(); ia++)
 	{
 		auto& atom = unit_cell_.atom(ia);
@@ -31,16 +39,15 @@ void Potential::init_PAW()
 		int n_rho_lm_comp = (2 * rad_func_lmax + 1) * (2 * rad_func_lmax + 1);
 
 		// allocate potential
-		mdarray<double, 3> ae_atom_potential(n_rho_lm_comp, n_mt_points, ctx_.num_spins());
-		mdarray<double, 3> ps_atom_potential(n_rho_lm_comp, n_mt_points, ctx_.num_spins());
+		mdarray<double, 3> ae_atom_potential(n_rho_lm_comp, n_mt_points, ndm_);
+		mdarray<double, 3> ps_atom_potential(n_rho_lm_comp, n_mt_points, ndm_);
 
 		ae_paw_local_potential_.push_back(std::move(ae_atom_potential));
 		ps_paw_local_potential_.push_back(std::move(ps_atom_potential));
 
 		// allocate Dij
-		//		mdarray<double, 2> atom_Dij( (atype.indexb().size() * (atype.indexb().size()+1)) / 2, ctx_.num_spins());
-
-		//		paw_local_Dij_matrix_.push_back(std::move(atom_Dij)); valence_eval_sum
+		mdarray<double_complex, 3> atom_Dij( atype.indexb().size() , atype.indexb().size(), ndm_);
+		paw_dij_.push_back(std::move(atom_Dij));
 
 		paw_core_energies_[ia] = atype.get_PAW_descriptor().core_energy;
 	}
@@ -72,6 +79,71 @@ void Potential::generate_PAW_effective_potential(std::vector< mdarray<double, 2>
 								 paw_ps_local_magnetization->at(ia));
 
 		calc_PAW_local_Dij(ia);
+
+		//////////////////////////////////////////////////////////////////
+
+		std::stringstream s;
+		s<<"atom_dij"<<ia<<".dat";
+
+		std::ofstream ofxc(s.str());
+
+		for(int ib2 = 0; ib2 < (int)unit_cell_.atom(ia).mt_lo_basis_size(); ib2++)
+		{
+		    for(int ib1 = 0; ib1 < (int)unit_cell_.atom(ia).mt_lo_basis_size(); ib1++)
+		    {
+		        ofxc<< paw_dij_[ia](ib2,ib1,0).real() << std::endl;
+		    }
+		}
+
+		ofxc.close();
+
+
+
+		//////////////////////////////////////////////////////////////////
+	}
+
+
+
+	symmetrize_PAW_Dij_matrix();
+
+
+	// copy dij to common d_mtrx
+	for(int ia = 0; ia < unit_cell_.num_atoms(); ia++)
+	{
+        //////////////////////////////////////////////////////////////////
+
+        std::stringstream s;
+        s<<"atom_sym_dij"<<ia<<".dat";
+
+        std::ofstream ofxc(s.str());
+
+        for(int ib2 = 0; ib2 < (int)unit_cell_.atom(ia).mt_lo_basis_size(); ib2++)
+        {
+            for(int ib1 = 0; ib1 < (int)unit_cell_.atom(ia).mt_lo_basis_size(); ib1++)
+            {
+                ofxc<< paw_dij_[ia](ib2,ib1,0).real() << std::endl;
+            }
+        }
+
+        ofxc.close();
+        //////////////////////////////////////////////////////////////////
+
+	    mdarray<double_complex, 3>& dij = paw_dij_[ia];
+
+	    auto& atom = unit_cell_.atom(ia);
+
+	    auto& atom_type = atom.type();
+
+	    for(int is = 0; is < ndm_;  is++ )
+	    {
+	        for(int ib2=0; ib2<atom_type.indexb().size(); ib2++)
+	        {
+	            for(int ib1=0; ib1<atom_type.indexb().size(); ib1++)
+	            {
+	                atom.d_mtrx(ib1,ib2,is) += dij(ib1,ib2,is);
+	            }
+	        }
+	    }
 	}
 
 	// separate because I can
@@ -83,6 +155,8 @@ void Potential::generate_PAW_effective_potential(std::vector< mdarray<double, 2>
 		paw_hartree_total_energy_ += paw_hartree_energies_[ia];
 		paw_xc_total_energy_ += paw_xc_energies_[ia];
 	}
+
+	//TERMINATE("lkjh");
 }
 
 
@@ -419,6 +493,10 @@ void Potential::calc_PAW_local_potential(int atom_index,
 //----------------------------------------------------------------------------
 void Potential::calc_PAW_local_Dij(int atom_index)
 {
+    std::cout<<"Dij out"<<std::endl;
+
+    paw_dij_[atom_index].zero();
+
 	auto& atom = unit_cell_.atom(atom_index);
 
 	auto& atom_type = atom.type();
@@ -490,6 +568,7 @@ void Potential::calc_PAW_local_Dij(int atom_index)
 //	std::cout<<std::endl;
 	///////////////////////////////////////////////////////////////////////
 
+
 	//---- calc Dij ----
 	for(int ib2 = 0; ib2 < (int)atom_type.mt_lo_basis_size(); ib2++)
 	{
@@ -519,12 +598,30 @@ void Potential::calc_PAW_local_Dij(int atom_index)
 					auto& lm3coef = GC.gaunt(lm1,lm2,inz);
 
 					// add to atom Dij an integral of dij array
-					//atom.d_mtrx(ib1,ib2,ispin) += lm3coef.coef * integrals(lm3coef.lm3, iqij, ispin);
-					//atom.d_mtrx(ib2,ib1,ispin) += lm3coef.coef * integrals(lm3coef.lm3, iqij, ispin);
+					paw_dij_[atom_index](ib1,ib2,ispin) += lm3coef.coef * integrals(lm3coef.lm3, iqij, ispin);
+
+
 				}
+
+				//debug
+				if(ib2 != ib1)
+				{
+				    paw_dij_[atom_index](ib2,ib1,ispin) = paw_dij_[atom_index](ib1,ib2,ispin);
+				}
+
+//				atom.d_mtrx(ib1,ib2,ispin) += dpaw(ib1,ib2,ispin);
+//
+//				if(ib2 != ib1)
+//				{
+//				    atom.d_mtrx(ib2,ib1,ispin) += dpaw(ib1,ib2,ispin);
+//				}
 			}
 		}
 	}
+
+
+
+
 //
 //
 //	std::cout <<" DIJ"<<std::endl;
@@ -538,27 +635,83 @@ void Potential::calc_PAW_local_Dij(int atom_index)
 //	std::cout <<std::endl;
 //	std::cout<<std::endl;
 
-	//////////////////////////////////////////////////////////////////
 
-	        std::stringstream s;
-	        s<<"atom_dij"<<atom_index<<".dat";
-
-	        std::ofstream ofxc(s.str());
-
-	        for(int ib2 = 0; ib2 < (int)atom_type.mt_lo_basis_size(); ib2++)
-	        {
-	            for(int ib1 = 0; ib1 < (int)atom_type.mt_lo_basis_size(); ib1++)
-	            {
-	                ofxc<< atom.d_mtrx(ib1,ib2,0).real() << std::endl;
-	            }
-	        }
-
-	        ofxc.close();
-
-
-
-	        //////////////////////////////////////////////////////////////////
 	//	TERMINATE("ololo");
 }
 
+
+void Potential::symmetrize_PAW_Dij_matrix()
+{
+    PROFILE_WITH_TIMER("sirius::Potential::symmetrize_PAW_Dij_matrix");
+
+    auto sym = unit_cell_.symmetry();
+
+    std::vector<mdarray<double_complex, 3>> sym_paw_dij;
+
+
+    // allocate temp Dij
+    for(int ia=0; ia<unit_cell_.num_atoms(); ia++)
+    {
+        auto& atom = unit_cell_.atom(ia);
+
+
+        auto& atom_type = atom.type();
+
+        mdarray<double_complex, 3> atom_Dij( atom_type.indexb().size() , atom_type.indexb().size(), ndm_);
+
+        atom_Dij.zero();
+
+        sym_paw_dij.push_back(std::move(atom_Dij));
+    }
+
+
+    int lmax = unit_cell_.lmax();
+    int lmmax = Utils::lmmax(lmax);
+
+    mdarray<double, 2> rotm(lmmax, lmmax);
+
+    double alpha = 1.0 / double(sym->num_mag_sym());
+
+    for (int i = 0; i < sym->num_mag_sym(); i++) {
+        int pr = sym->magnetic_group_symmetry(i).spg_op.proper;
+        auto& eang = sym->magnetic_group_symmetry(i).spg_op.euler_angles;
+        int isym = sym->magnetic_group_symmetry(i).isym;
+        SHT::rotation_matrix(lmax, eang, pr, rotm);
+
+        for (int ia = 0; ia < unit_cell_.num_atoms(); ia++) {
+            auto& atom_type = unit_cell_.atom(ia).type();
+            int ja = sym->sym_table(ia, isym);
+
+            for (int xi1 = 0; xi1 < unit_cell_.atom(ia).mt_basis_size(); xi1++) {
+                int l1  = atom_type.indexb(xi1).l;
+                int lm1 = atom_type.indexb(xi1).lm;
+                int o1  = atom_type.indexb(xi1).order;
+
+                for (int xi2 = 0; xi2 < unit_cell_.atom(ia).mt_basis_size(); xi2++) {
+                    int l2  = atom_type.indexb(xi2).l;
+                    int lm2 = atom_type.indexb(xi2).lm;
+                    int o2  = atom_type.indexb(xi2).order;
+
+                    for (int j = 0; j < ndm_; j++) {
+                        for (int m3 = -l1; m3 <= l1; m3++) {
+                            int lm3 = Utils::lm_by_l_m(l1, m3);
+                            int xi3 = atom_type.indexb().index_by_lm_order(lm3, o1);
+                            for (int m4 = -l2; m4 <= l2; m4++) {
+                                int lm4 = Utils::lm_by_l_m(l2, m4);
+                                int xi4 = atom_type.indexb().index_by_lm_order(lm4, o2);
+                                sym_paw_dij[ia](xi1, xi2, j) += paw_dij_[ja](xi3, xi4, j) * rotm(lm1, lm3) * rotm(lm2, lm4) * alpha;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    //ctx_.comm().allreduce(dm.at<CPU>(), static_cast<int>(dm.size()));
+    for(int ia=0; ia<unit_cell_.num_atoms(); ia++)
+    {
+        sym_paw_dij[ia] >> paw_dij_[ia];
+    }
+}
 }

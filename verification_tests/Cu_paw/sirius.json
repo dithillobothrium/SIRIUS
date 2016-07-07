@@ -9,7 +9,7 @@
     "xc_functionals" : ["XC_LDA_X", "XC_LDA_C_PZ"],
 
     "iterative_solver" : {
-        "energy_tolerance" : 1e-2,
+        "energy_tolerance" : 1e-12,
         "residual_tolerance" : 1e-10,
         "num_steps" : 20,
         "subspace_size" : 4,
@@ -21,7 +21,7 @@
 
     "use_symmetry" : 1,
 
-    "num_mag_dims" : 1,
+    "num_mag_dims" : 0,
 
     "gk_cutoff" : 6.0,
     "pw_cutoff" : 25.00,
@@ -30,7 +30,9 @@
 
     "num_dft_iter" : 100,
 
-    "ngridk" : [7,7,7],
+    "ngridk" : [8,8,8],
+
+    "reduce_gvec": 0,
 
     "unit_cell" : {
 
@@ -54,7 +56,7 @@
     },
 
     "mixer" : {
-        "beta" : 0.01,
+        "beta" : 0.7,
         "type" : "broyden1",
         "max_history" : 8
     }

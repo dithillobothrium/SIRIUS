@@ -28,7 +28,7 @@
 
     "energy_tol" : 1e-8,
 
-    "num_dft_iter" : 2,
+    "num_dft_iter" : 100,
 
     "ngridk" : [8,8,8],
 

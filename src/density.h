@@ -219,6 +219,9 @@ class Density
         /// generate n_1 and \tilda{n}_1 in lm components
         void generate_paw_loc_density();
 
+        void symmetrize_density_matrix();
+
+
     public:
 
         /// Constructor

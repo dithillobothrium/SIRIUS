@@ -144,6 +144,11 @@ class Symmetry
             return spg_dataset_->equivalent_atoms[ia__];
         }
 
+        inline int sym_table(int ia__, int isym__) const
+        {
+            return sym_table_(ia__, isym__);
+        }
+
         inline int spacegroup_number()
         {
             return spg_dataset_->spacegroup_number;
