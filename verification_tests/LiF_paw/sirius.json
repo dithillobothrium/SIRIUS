@@ -28,9 +28,9 @@
 
     "energy_tol" : 1e-8,
 
-    "num_dft_iter" : 1,
+    "num_dft_iter" : 100,
 
-    "ngridk" : [4,4,4],
+    "ngridk" : [8,8,8],
 
     "reduce_gvec": 0,
 
@@ -60,7 +60,7 @@
 
     "mixer" : {
         "beta" : 0.7,
-        "type" : "linear",
+        "type" : "broyden1",
         "max_history" : 8
     }
 

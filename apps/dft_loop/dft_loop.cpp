@@ -2,7 +2,7 @@
 
 using namespace sirius;
 
-void write_json_output(Simulation_context& ctx, DFT_ground_state& gs)
+void write_json_output(Simulation_context& ctx, DFT_ground_state& gs) 
 {
     //double evalsum1 = gs.kset_->valence_eval_sum();
     //double evalsum2 = gs.core_eval_sum();

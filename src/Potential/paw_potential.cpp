@@ -104,7 +104,7 @@ void Potential::generate_PAW_effective_potential(std::vector< mdarray<double, 2>
 
 
 
-	symmetrize_PAW_Dij_matrix();
+	//symmetrize_PAW_Dij_matrix();
 
 
 	// copy dij to common d_mtrx
