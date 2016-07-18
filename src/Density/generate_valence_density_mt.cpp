@@ -323,7 +323,32 @@ void Density::generate_paw_loc_density()
 
 //      }
 
-
+//        /////////////////////////////////////////////////////////
+//        stringstream ss;
+//        ss<<"dm_"<<ia<<".dat";
+//        ofstream off(ss.str());
+//
+//        for(int i=0;i<density_matrix_.size(1);i++)
+//            for(int j=0;j<density_matrix_.size(0);j++)
+//                off<<density_matrix_(j,i,0,ia).real()<<" ";
+//
+//
+//        off.close();
+//        /////////////////////////////////////////////////////////
+//
+//
+//
+//        stringstream s;
+//        s<<"rho_"<<ia<<".dat";
+//        ofstream of(s.str());
+//
+//
+//        for(int i=0;i<ae_atom_density.size(0);i++)
+//            for(int j=0;j<ae_atom_density.size(1);j++)
+//                of<<ae_atom_density(i,j)<<" ";
+//
+//
+//        of.close();
 
 
 

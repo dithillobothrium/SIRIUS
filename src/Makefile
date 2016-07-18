@@ -117,9 +117,10 @@ all: log $(OBJ) sirius_api.o sirius.o
 
 #%.o: %.cpp
 #	$(CXX) $(CXX_OPT_DBG) -c -o $(*D)/$(*F).o $<
-
-debug: $(OBJ_DBG)
-	ar -r libsirius.dbg.a $(OBJ_DBG)
+debug: CXX_OPT=$(CXX_OPT_DBG)
+debug: log $(OBJ) sirius_api.o sirius.o
+	ar -r libsirius.dbg.a $(OBJ)
+	ar -r libsirius_f.dbg.a $(OBJ) sirius_api.o sirius.o
 
 
 
