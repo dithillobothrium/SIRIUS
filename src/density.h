@@ -150,6 +150,8 @@ class Density
 
         Mixer<double_complex>* high_freq_mixer_;
         Mixer<double_complex>* low_freq_mixer_;
+        Mixer<double_complex>* paw_dm_mixer_;
+
         Mixer<double>* mixer_;
 
         std::vector<int> lf_gvec_;
@@ -439,6 +441,8 @@ class Density
             return &paw_ps_local_magnetization_;
         }
 
+        double paw_dm_mix();
+
         void allocate()
         {
             rho_->allocate_mt(true);
@@ -457,25 +461,35 @@ class Density
             else
             {
                 int k = 0;
+
                 for (int ig: lf_gvec_)
+                {
                     low_freq_mixer_->input(k++, rho_->f_pw(ig));
+                }
+
                 for (int j = 0; j < ctx_.num_mag_dims(); j++)
                 {
                     for (int ig: lf_gvec_)
                         low_freq_mixer_->input(k++, magnetization_[j]->f_pw(ig));
                 }
-                for (size_t i = 0; i < density_matrix_.size(); i++) {
-                     low_freq_mixer_->input(k++, density_matrix_[i]);
-                }
+
+
 
                 k = 0;
                 for (int ig: hf_gvec_)
+                {
                     high_freq_mixer_->input(k++, rho_->f_pw(ig));
+                }
+
                 for (int j = 0; j < ctx_.num_mag_dims(); j++)
                 {
                     for (int ig: hf_gvec_)
+                    {
                         high_freq_mixer_->input(k++, magnetization_[j]->f_pw(ig));
+                    }
                 }
+
+
             }
         }
 
@@ -491,24 +505,33 @@ class Density
 
                 int k = 0;
                 for (int ig: lf_gvec_)
+                {
                     rho_->f_pw(ig) = low_freq_mixer_->output_buffer(k++);
+                }
+
                 for (int j = 0; j < ctx_.num_mag_dims(); j++)
                 {
                     for (int ig: lf_gvec_)
+                    {
                         magnetization_[j]->f_pw(ig) = low_freq_mixer_->output_buffer(k++);
-                }
-                for (size_t i = 0; i < density_matrix_.size(); i++) {
-                    density_matrix_[i] = low_freq_mixer_->output_buffer(k++);
+                    }
                 }
 
                 k = 0;
                 for (int ig: hf_gvec_)
+                {
                     rho_->f_pw(ig) = high_freq_mixer_->output_buffer(k++);
+                }
+
                 for (int j = 0; j < ctx_.num_mag_dims(); j++)
                 {
                     for (int ig: hf_gvec_)
+                    {
                         magnetization_[j]->f_pw(ig) = high_freq_mixer_->output_buffer(k++);
+                    }
                 }
+
+
             }
         }
 
@@ -524,6 +547,7 @@ class Density
             {
                 low_freq_mixer_->initialize();
                 high_freq_mixer_->initialize();
+                paw_dm_mixer_->initialize();
             }
         }
 
@@ -547,6 +571,12 @@ class Density
                 rms = low_freq_mixer_->mix();
                 rms += high_freq_mixer_->mix();
                 mixer_output();
+
+                if(ctx_.esm_type() == paw_pseudopotential)
+                {
+                    rms += paw_dm_mix();
+                }
+
                 ctx_.fft().prepare();
                 rho_->fft_transform(1);
                 for (int j = 0; j < ctx_.num_mag_dims(); j++) magnetization_[j]->fft_transform(1);

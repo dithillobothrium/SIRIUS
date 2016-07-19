@@ -53,7 +53,7 @@ Density::Density(Simulation_context& ctx__)
     if (!ctx_.full_potential())
     {
         lf_gvec_ = std::vector<int>(ctx_.gvec_coarse().num_gvec());
-        std::vector<double> weights(ctx_.gvec_coarse().num_gvec() * (1 + ctx_.num_mag_dims()) + density_matrix_.size(), 1.0);
+        std::vector<double> weights(ctx_.gvec_coarse().num_gvec() * (1 + ctx_.num_mag_dims()) , 1.0);
 
         weights[0] = 0;
         lf_gvec_[0] = 0;
@@ -82,7 +82,7 @@ Density::Density(Simulation_context& ctx__)
             TERMINATE(s);
         }
 
-        high_freq_mixer_ = new Linear_mixer<double_complex>(hf_gvec_.size() * (1 + ctx_.num_mag_dims()),
+        high_freq_mixer_ = new Linear_mixer<double_complex>(hf_gvec_.size() * (1 + ctx_.num_mag_dims()) + density_matrix_.size(),
                                                             ctx_.mixer_input_section().beta_, ctx_.comm());
 
         if (ctx_.mixer_input_section().type_ == "linear")
@@ -93,7 +93,7 @@ Density::Density(Simulation_context& ctx__)
         else if (ctx_.mixer_input_section().type_ == "broyden1")
         {
 
-            low_freq_mixer_ = new Broyden1<double_complex>(lf_gvec_.size() * (1 + ctx_.num_mag_dims()) + density_matrix_.size(),
+            low_freq_mixer_ = new Broyden1<double_complex>(lf_gvec_.size() * (1 + ctx_.num_mag_dims()) ,
                                                            ctx_.mixer_input_section().max_history_,
                                                            ctx_.mixer_input_section().beta_,
                                                            weights,
@@ -112,6 +112,11 @@ Density::Density(Simulation_context& ctx__)
         else
         {
             TERMINATE("wrong mixer type");
+        }
+
+        if(ctx_.esm_type() == paw_pseudopotential)
+        {
+            paw_dm_mixer_ = Linear_mixer<double_complex>(density_matrix_.size(), ctx_.mixer_input_section().beta_, ctx_.comm());
         }
     }
 
@@ -203,7 +208,35 @@ Density::~Density()
     if (gaunt_coefs_ != nullptr) delete gaunt_coefs_;
     if (low_freq_mixer_ != nullptr) delete low_freq_mixer_;
     if (high_freq_mixer_ != nullptr) delete high_freq_mixer_;
+
+    if(ctx_.esm_type() == paw_pseudopotential)
+    {
+        delete paw_dm_mixer_;
+    }
+
     if (mixer_ != nullptr) delete mixer_;
 }
+
+
+
+double Density::paw_dm_mix()
+{
+    double rms = 0.0;
+
+    for (size_t i = 0; i < density_matrix_.size(); i++)
+    {
+        paw_dm_mixer_->input(i, density_matrix_[i]);
+    }
+
+    rms = paw_dm_mixer_->mix();
+
+    for (size_t i = 0; i < density_matrix_.size(); i++)
+    {
+        density_matrix_[i] = paw_dm_mixer_->output_buffer(i);
+    }
+
+    return rms;
+}
+
 
 };
