@@ -129,7 +129,7 @@ Density::Density(Simulation_context& ctx__)
 
         if(ctx_.esm_type() == paw_pseudopotential)
         {
-            paw_dm_mixer_ = Linear_mixer<double_complex>(density_matrix_.size(), ctx_.mixer_input_section().beta_, ctx_.comm());
+            paw_dm_mixer_ = new Linear_mixer<double_complex>(density_matrix_.size(), ctx_.mixer_input_section().beta_, ctx_.comm());
         }
     }
 

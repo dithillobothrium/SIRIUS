@@ -176,16 +176,22 @@ int DFT_ground_state::find(double potential_tol, double energy_tol, int num_dft_
                        density_.magnetization(2));
         }
         /* set new tolerance of iterative solver */
-        if (!ctx_.full_potential()) {
+        if (!ctx_.full_potential())
+        {
             rms = density_.mix();
+
             double tol = std::max(1e-12, 0.1 * density_.dr2() / ctx_.unit_cell().num_valence_electrons());
-            if (ctx_.comm().rank() == 0) {
+
+            if (ctx_.comm().rank() == 0)
+            {
                 printf("dr2: %18.10f, tol: %18.10f\n",  density_.dr2(), tol);
             }
+
             ctx_.set_iterative_solver_tolerance(std::min(ctx_.iterative_solver_tolerance(), tol));
         }
 
-        if (ctx_.esm_type() == paw_pseudopotential) {
+        if (ctx_.esm_type() == paw_pseudopotential)
+        {
             density_.generate_paw_loc_density();
         }
 
