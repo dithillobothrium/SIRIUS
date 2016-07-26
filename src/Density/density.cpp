@@ -68,6 +68,8 @@ Density::Density(Simulation_context& ctx__)
         lf_gvec_ = std::vector<int>(ctx_.gvec_coarse().num_gvec());
         std::vector<double> weights(ctx_.gvec_coarse().num_gvec() * (1 + ctx_.num_mag_dims()) , 1.0);
 
+        std::vector<double> paw_dm_weights(density_matrix_.size(),1.0);
+
         weights[0] = 0;
         lf_gvec_[0] = 0;
 
@@ -129,7 +131,32 @@ Density::Density(Simulation_context& ctx__)
 
         if(ctx_.esm_type() == paw_pseudopotential)
         {
-            paw_dm_mixer_ = new Linear_mixer<double_complex>(density_matrix_.size(), ctx_.mixer_input_section().beta_, ctx_.comm());
+            if(  ctx_.mixer_input_section().type_ == "linear" )
+            {
+                paw_dm_mixer_ = new Linear_mixer<double_complex>(density_matrix_.size(),
+                                                                 ctx_.mixer_input_section().beta_,
+                                                                 ctx_.comm());
+            }
+
+            if(  ctx_.mixer_input_section().type_ == "broyden1" )
+            {
+                paw_dm_mixer_ = new Broyden1<double_complex>(density_matrix_.size(),
+                                                                 ctx_.mixer_input_section().max_history_,
+                                                                 ctx_.mixer_input_section().beta_,
+                                                                 paw_dm_weights,
+                                                                 ctx_.comm());
+            }
+
+            if(  ctx_.mixer_input_section().type_ == "broyden1" )
+            {
+                paw_dm_mixer_ = new Broyden2<double_complex>(density_matrix_.size(),
+                                                             ctx_.mixer_input_section().max_history_,
+                                                             ctx_.mixer_input_section().beta_,
+                                                             ctx_.mixer_input_section().beta0_,
+                                                             ctx_.mixer_input_section().linear_mix_rms_tol_,
+                                                             paw_dm_weights,
+                                                             ctx_.comm());
+            }
         }
     }
 
