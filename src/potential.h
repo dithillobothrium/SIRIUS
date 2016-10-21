@@ -154,6 +154,27 @@ class Potential
 
         void add_paw_Dij_to_atom_Dmtrx();
 
+
+
+        void init();
+
+
+
+
+    public:
+
+        /// Constructor
+        Potential(Simulation_context& ctx__);
+
+        ~Potential();
+
+        void set_effective_potential_ptr(double* veffmt, double* veffit);
+
+        void set_effective_magnetic_field_ptr(double* beffmt, double* beffit);
+
+        /// Zero effective potential and magnetic field.
+        void zero();
+
         //------------------------------------------------
         //------------------------------------------------
         //Spheric_function<function_domain_t::spectral,double>
@@ -164,21 +185,21 @@ class Potential
 
         /// Compute MT part of the potential and MT multipole moments
         void poisson_atom_vmt(Spheric_function<function_domain_t::spectral,double> &rho_mt,
-                        Spheric_function<function_domain_t::spectral,double> &vh_mt,
-                        mdarray<double_complex, 1>& qmt_mt,
-                        Atom &atom);
+                              Spheric_function<function_domain_t::spectral,double> &vh_mt,
+                              mdarray<double_complex, 1>& qmt_mt,
+                              Atom &atom);
 
         /// Perform a G-vector summation of plane-wave coefficiens multiplied by radial integrals.
         void poisson_sum_G(int lmmax__, 
                            double_complex* fpw__, 
                            mdarray<double, 3>& fl__, 
                            mdarray<double_complex, 2>& flm__);
-        
+
         /// Add contribution from the pseudocharge to the plane-wave expansion
         void poisson_add_pseudo_pw(mdarray<double_complex, 2>& qmt, mdarray<double_complex, 2>& qit, double_complex* rho_pw);
 
         void generate_local_potential();
-        
+
         void xc_mt_nonmagnetic(Radial_grid const& rgrid,
                                std::vector<XC_functional*>& xc_func,
                                Spheric_function<spectral, double> const& rho_lm,
@@ -202,7 +223,7 @@ class Potential
                    Periodic_function<double>* vxc, 
                    Periodic_function<double>* bxc[3], 
                    Periodic_function<double>* exc);
-    
+
         void xc_it_nonmagnetic(Periodic_function<double>* rho, 
                                std::vector<XC_functional*>& xc_func,
                                Periodic_function<double>* vxc, 
@@ -214,25 +235,7 @@ class Potential
                             Periodic_function<double>* vxc, 
                             Periodic_function<double>* bxc[3], 
                             Periodic_function<double>* exc);
-
-        void init();
-
-
-
-
-    public:
-
-        /// Constructor
-        Potential(Simulation_context& ctx__);
-
-        ~Potential();
-
-        void set_effective_potential_ptr(double* veffmt, double* veffit);
         
-        void set_effective_magnetic_field_ptr(double* beffmt, double* beffit);
-         
-        /// Zero effective potential and magnetic field.
-        void zero();
 
         /// Poisson solver.
         /** Detailed explanation is available in:

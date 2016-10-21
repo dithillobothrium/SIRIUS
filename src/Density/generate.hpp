@@ -125,6 +125,11 @@ inline void Density::generate_valence(K_set& ks__)
     }
 }
 
+
+
+
+//------------------------------------------------------------------------------------------
+//------------------------------------------------------------------------------------------
 inline void Density::generate(K_set& ks__)
 {
     PROFILE_WITH_TIMER("sirius::Density::generate");
