@@ -235,8 +235,10 @@ class Potential
                             Periodic_function<double>* vxc, 
                             Periodic_function<double>* bxc[3], 
                             Periodic_function<double>* exc);
-        
 
+        vector<XC_functional*> get_xc_functionals(){ return xc_func_;}
+
+        SHT* get_SHT(){return sht_.get();}
         /// Poisson solver.
         /** Detailed explanation is available in:
          *      - Weinert, M. (1981). Solution of Poisson's equation: beyond Ewald-type methods. 

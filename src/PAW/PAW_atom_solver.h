@@ -21,12 +21,12 @@ class PAW_atom_solver
 {
 private:
 
-    Simulation_context *ctx_;
+    Simulation_context *ctx_{nullptr};
 
     // atom info
-    Atom *atom_;
-    Atom_type *atom_type_;
-    pseudopotential_descriptor *pp_desc_;
+    Atom *atom_{nullptr};
+    Atom_type *atom_type_{nullptr};
+    pseudopotential_descriptor *pp_desc_{nullptr};
 
     int basis_size_;
     int num_mt_points_;
@@ -40,8 +40,13 @@ private:
     mdarray<double, 3> ae_magnetization_;
     mdarray<double, 3> ps_magnetization_;
 
+    // pointer to systems density matrix
+    mdarray<double_complex, 4> *density_matrix_{nullptr}
+
     // potential data
-    Potential *potential_;
+    // TODO replace by radial XC , Poisson solvers
+    Potential *potential_{nullptr};
+    SHT *sht_{nullptr};
 
     mdarray<double,3>  ae_potential_;
     mdarray<double,3>  ps_potential_;
@@ -55,8 +60,9 @@ private:
 
 public:
 
-    PAW_atom_solver(Simulation_context* ctx, Atom* atom, pseudopotential_descriptor *pp_desc) :
-        ctx_(ctx), atom_(atom), pp_desc_(pp_desc)
+    PAW_atom_solver(Simulation_context* ctx, Atom* atom, pseudopotential_descriptor *pp_desc,
+                    mdarray<double_complex, 4> *density_matrix, Potential *potential) :
+        ctx_(ctx), atom_(atom), pp_desc_(pp_desc), density_matrix_(density_matrix), potential_(potential)
     {
         atom_type_ = &atom_->type();
 
@@ -65,11 +71,19 @@ public:
 
         l_max_ = atom_type_->indexr().lmax_lo();
         lm_max_rho_ = (2 * l_max_ + 1) * (2 * l_max_ + 1);
+
+        sht_ = potential_->get_SHT();
     }
+
+    void set_density_matrix(mdarray<double_complex, 4> *density_matrix);
 
     void init_density();
 
     void init_potential();
+
+    void init_density_matrix(mdarray<double_complex, 4> &density_matrix);
+
+    void generate_density(mdarray<double_complex, 4> &density_matrix);
 
     void generate_potential();
 

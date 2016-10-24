@@ -67,7 +67,7 @@ void PAW_atom_solver::generate_potential()
     double ae_hartree_energy = calc_PAW_hartree_potential(ae_density_,
                                                           ae_potential_);
 
-    double ps_hartree_energy = calc_PAW_hartree_potential(ps_full_density,
+    double ps_hartree_energy = calc_PAW_hartree_potential(ps_density_,
                                                           ps_potential_);
 
     paw_hartree_energy_ = ae_hartree_energy - ps_hartree_energy;
@@ -188,7 +188,7 @@ double PAW_atom_solver::calc_xc_nonmagnetic(mdarray<double, 3> &out_atom_pot,
         full_rho_lm_sf_new(0,ir) += invY00 * rho_core[ir];
     }
 
-    Spheric_function<spatial,double> full_rho_tp_sf = transform(sht_.get(), full_rho_lm_sf_new);
+    Spheric_function<spatial,double> full_rho_tp_sf = transform(sht_, full_rho_lm_sf_new);
 
     // create potential in theta phi
     Spheric_function<spatial,double> vxc_tp_sf(sht_->num_points(), rgrid);
@@ -196,14 +196,14 @@ double PAW_atom_solver::calc_xc_nonmagnetic(mdarray<double, 3> &out_atom_pot,
     // create energy in theta phi
     Spheric_function<spatial,double> exc_tp_sf(sht_->num_points(), rgrid);
 
-    potential_->xc_mt_nonmagnetic(rgrid, xc_func_, full_rho_lm_sf_new, full_rho_tp_sf, vxc_tp_sf, exc_tp_sf);
+    potential_->xc_mt_nonmagnetic(rgrid, potential_->get_xc_functionals(), full_rho_lm_sf_new, full_rho_tp_sf, vxc_tp_sf, exc_tp_sf);
 
-    out_atom_pot_sf += transform(sht_.get(), vxc_tp_sf);
+    out_atom_pot_sf += transform(sht_, vxc_tp_sf);
 
     //------------------------
     //--- calculate energy ---
     //------------------------
-    Spheric_function<spectral,double> exc_lm_sf = transform(sht_.get(), exc_tp_sf );
+    Spheric_function<spectral,double> exc_lm_sf = transform(sht_, exc_tp_sf );
 
     return inner(exc_lm_sf, full_rho_lm_sf_new);
 }
@@ -250,8 +250,8 @@ double PAW_atom_solver::calc_xc_collinear(mdarray<double,3> &out_atom_pot,
     Spheric_function<spectral,double> rho_d_lm_sf =  0.5 * (full_rho_lm_sf_new - magnetization_Z_lm);
 
     // transform density to theta phi components
-    Spheric_function<spatial,double> rho_u_tp_sf = transform(sht_.get(), rho_u_lm_sf );
-    Spheric_function<spatial,double> rho_d_tp_sf = transform(sht_.get(), rho_d_lm_sf );
+    Spheric_function<spatial,double> rho_u_tp_sf = transform(sht_, rho_u_lm_sf );
+    Spheric_function<spatial,double> rho_d_tp_sf = transform(sht_, rho_d_lm_sf );
 
     // create potential in theta phi
     Spheric_function<spatial,double> vxc_u_tp_sf(sht_->num_points(), rgrid);
@@ -261,15 +261,15 @@ double PAW_atom_solver::calc_xc_collinear(mdarray<double,3> &out_atom_pot,
     Spheric_function<spatial,double> exc_tp_sf(sht_->num_points(), rgrid);
 
     // calculate XC
-    potential_->xc_mt_magnetic(rgrid, xc_func_,
+    potential_->xc_mt_magnetic(rgrid, potential_->get_xc_functionals(),
                                rho_u_lm_sf, rho_u_tp_sf,
                                rho_d_lm_sf, rho_d_tp_sf,
                                vxc_u_tp_sf, vxc_d_tp_sf,
                                exc_tp_sf);
 
     // transform back in lm
-    out_atom_effective_pot_sf += transform(sht_.get(), 0.5 * (vxc_u_tp_sf + vxc_u_tp_sf) );
-    out_atom_effective_field_sf += transform(sht_.get(), 0.5 * (vxc_u_tp_sf - vxc_u_tp_sf));
+    out_atom_effective_pot_sf += transform(sht_, 0.5 * (vxc_u_tp_sf + vxc_u_tp_sf) );
+    out_atom_effective_field_sf += transform(sht_, 0.5 * (vxc_u_tp_sf - vxc_u_tp_sf));
     //////////////////////////////////////////////////////////////
     //  std::cout<<"\n UP "<<std::endl;
     //  for(int lm=0; lm<out_atom_pot_up_sf.angular_domain_size(); lm++)
@@ -294,7 +294,7 @@ double PAW_atom_solver::calc_xc_collinear(mdarray<double,3> &out_atom_pot,
     //------------------------
     //--- calculate energy ---
     //------------------------
-    Spheric_function<spectral,double> exc_lm_sf = transform(sht_.get(), exc_tp_sf );
+    Spheric_function<spectral,double> exc_lm_sf = transform(sht_, exc_tp_sf );
 
     return inner(exc_lm_sf, full_rho_lm_sf_new);
 }
