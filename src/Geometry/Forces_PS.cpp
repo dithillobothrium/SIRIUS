@@ -34,7 +34,8 @@ void Forces_PS::calc_local_forces(mdarray<double,2>& forces)
 
     //mdarray<double_complex, 2> vloc_G_comp(unit_cell.num_atoms(), spl_ngv.local_size() );
 
-    if (forces.size(0) != 3 || (int)forces.size(1) != unit_cell.num_atoms()) {
+    if (forces.size(0) != 3 || (int)forces.size(1) != unit_cell.num_atoms())
+    {
         TERMINATE("forces array has wrong number of elements");
     }
 
@@ -179,7 +180,8 @@ void Forces_PS::calc_ultrasoft_forces(mdarray<double,2>& forces)
         Atom &atom = unit_cell.atom(ia);
 
         int iat = atom.type_id();
-        if (!unit_cell.atom_type(iat).pp_desc().augment) {
+        if (!unit_cell.atom_type(iat).pp_desc().augment)
+        {
             continue;
         }
 
@@ -266,8 +268,10 @@ void init_mdarray2d(mdarray<T,2> &priv, mdarray<T,2> &orig )
 template<typename T>
 void add_mdarray2d(mdarray<T,2> &in, mdarray<T,2> &out)
 {
-    for(size_t i = 0; i < in.size(1); i++ ) {
-        for(size_t j = 0; j < in.size(0); j++ ) {
+    for(size_t i = 0; i < in.size(1); i++ )
+    {
+        for(size_t j = 0; j < in.size(0); j++ )
+        {
             out(j,i) += in(j,i);
         }
     }

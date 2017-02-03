@@ -94,6 +94,23 @@ class Non_local_operator
             int nbf = beta_.unit_cell().atom(ia__).mt_basis_size();
             return op_(packed_mtrx_offset_(ia__) + xi2__ * nbf + xi1__, ispn__);
         }
+
+        // TODO in normal way
+        // temporary added to get this stuff in test::Non_local_operator
+        int packed_mtrx_offset(int ia__)
+        {
+            return packed_mtrx_offset_(ia__);
+        }
+
+        mdarray<T, 2>& operator_matrix_unsafe()
+        {
+            return op_;
+        }
+
+        device_t processing_unit()
+        {
+            return pu_;
+        }
 };
 
 template<>

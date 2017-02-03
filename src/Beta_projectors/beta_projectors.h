@@ -58,6 +58,16 @@ class Beta_projectors
 {
     friend class Beta_projectors_gradient;
 
+    public:
+        struct beta_chunk_t
+        {
+            int num_beta_;
+            int num_atoms_;
+            int offset_;
+            mdarray<int, 2> desc_;
+            mdarray<double, 2> atom_pos_;
+        };
+
     protected:
 
         Communicator const& comm_;
@@ -95,14 +105,7 @@ class Beta_projectors
         matrix<double_complex> beta_gk_gpu_;
         #endif
 
-        struct beta_chunk_t
-        {
-            int num_beta_;
-            int num_atoms_;
-            int offset_;
-            mdarray<int, 2> desc_;
-            mdarray<double, 2> atom_pos_;
-        };
+
 
         mdarray<beta_chunk_t, 1> beta_chunks_;
 

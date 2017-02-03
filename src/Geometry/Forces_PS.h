@@ -15,6 +15,7 @@
 #include "../Beta_projectors/beta_projectors_gradient.h"
 #include "../potential.h"
 #include "../density.h"
+#include "../Operator/Operator.h"
 
 namespace sirius
 {
@@ -168,99 +169,112 @@ private:
         // from formula
         double main_two_factor = -2.0;
 
-        for (int icnk = 0; icnk < bp.num_beta_chunks(); icnk++)
+#ifdef __GPU
+        for (int ispn = 0; ispn < ctx_.num_spins(); ispn++)
         {
-            // generate chunk for inner product of beta gradient
-            bp_grad.generate(icnk);
-
-            // generate chunk for inner product of beta
-            bp.generate(icnk);
-
-            for (int ispn = 0; ispn < ctx_.num_spins(); ispn++)
+            if( bp.proc_unit() == GPU )
             {
-                /* total number of occupied bands for this spin */
                 int nbnd = kpoint.num_occupied_bands(ispn);
+                kpoint.spinor_wave_functions(ispn).allocate_on_device();
+                kpoint.spinor_wave_functions(ispn).copy_to_device(0, nbnd);
+            }
+        }
+#endif
 
-                splindex<block> spl_nbnd(nbnd, kpoint.comm().size(), kpoint.comm().rank());
+bp_grad.prepare();
+bp.prepare();
 
-                int nbnd_loc = spl_nbnd.local_size();
+for (int icnk = 0; icnk < bp.num_beta_chunks(); icnk++)
+{
+    // generate chunk for inner product of beta gradient
+    bp_grad.generate(icnk);
 
-                int bnd_offset = spl_nbnd.global_offset();
+    // generate chunk for inner product of beta
+    bp.generate(icnk);
 
-                printf("rank: %d   nbnd: %d   nbnd_loc: %d   bnd_offset: %d   wf_size: %d %d    beta_gk_size: %d %d\n",
-                       ctx_.comm().rank(),
-                       nbnd,
-                       nbnd_loc,
-                       bnd_offset,
-                       kpoint.spinor_wave_functions(ispn).pw_coeffs().prime().size(0),
-                       kpoint.spinor_wave_functions(ispn).pw_coeffs().prime().size(1),
-                       bp.beta_gk().size(0),
-                       bp.beta_gk().size(1));
+    for (int ispn = 0; ispn < ctx_.num_spins(); ispn++)
+    {
+        /* total number of occupied bands for this spin */
+        int nbnd = kpoint.num_occupied_bands(ispn);
 
+        // inner product of beta gradient and WF
+        bp_grad.inner<T>(icnk, kpoint.spinor_wave_functions(ispn), 0, nbnd);
 
-                printf("kp vec: %f  %f  %f \n", kpoint.vk()[0],kpoint.vk()[1], kpoint.vk()[2]);
+        // get inner product
+        std::array<matrix<T>, 3> bp_grad_phi_chunk = bp_grad.beta_phi<T>(icnk, nbnd);
 
-                printf("nl1\n");
-                // inner product of beta and WF
-                bp.inner<T>(icnk, kpoint.spinor_wave_functions(ispn), bnd_offset, nbnd_loc);
+        // inner product of beta and WF
+        bp.inner<T>(icnk, kpoint.spinor_wave_functions(ispn), 0, nbnd);
 
-                printf("nl2\n");
-                // get inner product
-                matrix<T> bp_phi_chunk = bp.beta_phi<T>(icnk, nbnd_loc);
+        // get inner product
+        matrix<T> bp_phi_chunk = bp.beta_phi<T>(icnk, nbnd);
 
-                printf("nl3\n");
-                // inner product of beta gradient and WF
-                bp_grad.inner<T>(icnk, kpoint.spinor_wave_functions(ispn), bnd_offset, nbnd_loc);
+        splindex<block> spl_nbnd(nbnd, kpoint.comm().size(), kpoint.comm().rank());
 
-                printf("nl0\n");
-                // get inner product
-                std::array<matrix<T>, 3> bp_grad_phi_chunk = bp_grad.beta_phi<T>(icnk, nbnd_loc);
+        int nbnd_loc = spl_nbnd.local_size();
 
+        int bnd_offset = spl_nbnd.global_offset();
 
+#pragma omp parallel for
+        for(int ia_chunk = 0; ia_chunk < bp.beta_chunk(icnk).num_atoms_; ia_chunk++)
+        {
+            int ia = bp.beta_chunk(icnk).desc_(3, ia_chunk);
+            int offs = bp.beta_chunk(icnk).desc_(1, ia_chunk);
+            int nbf = bp.beta_chunk(icnk).desc_(0, ia_chunk);
+            int iat = unit_cell.atom(ia).type_id();
 
-                #pragma omp parallel for
-                for(int ia_chunk = 0; ia_chunk < bp.beta_chunk(icnk).num_atoms_; ia_chunk++)
+            //                    linalg<CPU>::gemm(0, 0, nbf, n__, nbf,
+                                                    //                                      op_.at<CPU>(packed_mtrx_offset_(ia), ispn__), nbf,
+            //                                      beta_phi.at<CPU>(offs, 0), nbeta,
+            //                                      work_.at<CPU>(offs), nbeta);
+
+            // mpi
+            // TODO make in smart way with matrix multiplication
+            for (int ibnd_loc = 0; ibnd_loc < nbnd_loc; ibnd_loc++)
+            {
+                int ibnd = spl_nbnd[ibnd_loc];
+
+                auto D_aug_mtrx = [&](int i, int j)
                 {
-                    int ia = bp.beta_chunk(icnk).desc_(3, ia_chunk);
-                    int offs = bp.beta_chunk(icnk).desc_(1, ia_chunk);
-                    int iat = unit_cell.atom(ia).type_id();
+                    if (unit_cell.atom(ia).type().pp_desc().augment) {
+                        return unit_cell.atom(ia).d_mtrx(i, j, ispn) - kpoint.band_energy(ibnd) *
+                                ctx_.augmentation_op(iat).q_mtrx(i, j);
+                    } else {
+                        return unit_cell.atom(ia).d_mtrx(i, j, ispn); // - ( i == j ? kpoint.band_energy(ibnd) : 0.0 );
+                    }
+                };
 
-
-
-                    // mpi
-                    // TODO make in smart way with matrix multiplication
-                    for (int ibnd_loc = 0; ibnd_loc < nbnd_loc; ibnd_loc++)
+                for(int ibf = 0; ibf < unit_cell.atom(ia).type().mt_lo_basis_size(); ibf++ )
+                {
+                    for(int jbf = 0; jbf < unit_cell.atom(ia).type().mt_lo_basis_size(); jbf++ )
                     {
-                        int ibnd = spl_nbnd[ibnd_loc];
+                        // calc scalar part of the forces
+                        double_complex scalar_part = main_two_factor *
+                        kpoint.band_occupancy(ibnd + ispn * ctx_.num_fv_states()) * kpoint.weight() *
+                        D_aug_mtrx(ibf, jbf) *
+                        std::conj(bp_phi_chunk(offs + jbf, ibnd));
 
-                        auto D_aug_mtrx = [&](int i, int j)
-                        {
-                            if (unit_cell.atom(ia).type().pp_desc().augment) {
-                                return unit_cell.atom(ia).d_mtrx(i, j, ispn) - kpoint.band_energy(ibnd) *
-                                        ctx_.augmentation_op(iat).q_mtrx(i, j);
-                            } else {
-                                return unit_cell.atom(ia).d_mtrx(i, j, ispn) - kpoint.band_energy(ibnd);
-                            }
-                        };
-
-                        for(int ibf = 0; ibf < unit_cell.atom(ia).type().mt_lo_basis_size(); ibf++ )
-                        {
-                            for(int jbf = 0; jbf < unit_cell.atom(ia).type().mt_lo_basis_size(); jbf++ )
-                            {
-                                // calc scalar part of the forces
-                                double_complex scalar_part = main_two_factor *
-                                        kpoint.band_occupancy(ibnd + ispn * ctx_.num_fv_states()) * kpoint.weight() *
-                                        D_aug_mtrx(ibf, jbf) *
-                                        std::conj(bp_phi_chunk(offs + jbf, ibnd_loc));
-
-                                // multiply scalar part by gradient components
-                                for(int comp: {0,1,2}) forces(comp,ia) += (scalar_part * bp_grad_phi_chunk[comp](offs + ibf, ibnd_loc)).real();
-                            }
-                        }
+                        // multiply scalar part by gradient components
+                        for(int comp: {0,1,2}) forces(comp,ia) += (scalar_part * bp_grad_phi_chunk[comp](offs + ibf, ibnd)).real();
                     }
                 }
             }
         }
+    }
+}
+
+bp.dismiss();
+bp_grad.dismiss();
+
+#ifdef __GPU
+for (int ispn = 0; ispn < ctx_.num_spins(); ispn++)
+{
+    if( bp.proc_unit() == GPU )
+    {
+        kpoint.spinor_wave_functions(ispn).deallocate_on_device();
+    }
+}
+#endif
     }
 
     void symmetrize_forces(mdarray<double,2>& unsym_forces, mdarray<double,2>& sym_forces );
