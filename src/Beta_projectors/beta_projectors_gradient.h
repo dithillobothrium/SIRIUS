@@ -5,8 +5,8 @@
  *      Author: isivkov
  */
 
-#ifndef SRC_BETA_PROJECTORS_BETA_PROJECTORS_GRADIENT_H_
-#define SRC_BETA_PROJECTORS_BETA_PROJECTORS_GRADIENT_H_
+#ifndef __BETA_PROJECTORS_GRADIENT_H__
+#define __BETA_PROJECTORS_GRADIENT_H__
 
 
 #include "beta_projectors.h"

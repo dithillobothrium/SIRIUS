@@ -102,6 +102,16 @@ class Non_local_operator
             return packed_mtrx_offset_(ia__);
         }
 
+        const mdarray<int, 1>& packed_mtrx_offset()
+        {
+            return packed_mtrx_offset_;
+        }
+
+        int packed_mtrx_size()
+        {
+            return packed_mtrx_size_;
+        }
+
         mdarray<T, 2>& operator_matrix_unsafe()
         {
             return op_;
