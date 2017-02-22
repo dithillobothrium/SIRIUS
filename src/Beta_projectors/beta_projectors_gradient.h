@@ -41,7 +41,7 @@ public:
         for(int comp: {0,1,2})
         {
             components_gk_a_[comp] = matrix<double_complex>( bp_->beta_gk_a().size(0), bp_->beta_gk_a().size(1) );
-            calc_gradient(comp);
+            initialize(comp);
         }
 
         // on GPU we create arrays without allocation, it will before use
@@ -54,7 +54,7 @@ public:
     }
 
 
-    void calc_gradient(int calc_component__)
+    void initialize(int calc_component__)
     {
         Gvec const& gkvec = bp_->gk_vectors();
 

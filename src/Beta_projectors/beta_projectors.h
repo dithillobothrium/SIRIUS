@@ -136,6 +136,7 @@ class Beta_projectors
             return beta_gk_t_;
         }
 
+
         matrix<double_complex> const& beta_gk_a()
         {
             return beta_gk_a_;

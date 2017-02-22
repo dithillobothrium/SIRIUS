@@ -5,8 +5,8 @@
  *      Author: isivkov
  */
 
-#ifndef __OPERATOR_H__
-#define __OPERATOR_H__
+#ifndef __CHUNK_LINALG_H__
+#define __CHUNK_LINALG_H__
 
 #include "../simulation_context.h"
 #include "../Beta_projectors/beta_projectors.h"
@@ -98,7 +98,12 @@ class Chunk_linalg<pu, double_complex>
                     int ia = chunk__.desc_(3, i);
 
                     /* compute |work> = O * |ket> */
-                    linalg<pu>::gemm(0, 0, nbf, num_bands__, nbf,
+//                    linalg<pu>::gemm(0, 0, nbf, num_bands__, nbf,
+//                                     operator__.at<CPU>(packed_mtrx_offsets__(ia)), nbf,
+//                                     ket__.at<CPU>(offs, bands_offset__), nbeta,
+//                                     result__.at<CPU>(offs, bands_offset__), nbeta);
+
+                    linalg<pu>::gemm(0, 0,  nbf, num_bands__, nbf,
                                      operator__.at<CPU>(packed_mtrx_offsets__(ia)), nbf,
                                      ket__.at<CPU>(offs, bands_offset__), nbeta,
                                      result__.at<CPU>(offs, bands_offset__), nbeta);
@@ -149,8 +154,8 @@ class Chunk_linalg<pu, double_complex>
                     /* compute |result> = |ket> * <bra| or <bra| * |ket>   */
                     linalg<pu>::gemm(transpose_bra__, transpose_ket__,
                                       nbf, nbf, num_bands__,
-                                      ket__.at<CPU>(offs, bands_offset__), nbeta,
                                       bra__.at<CPU>(offs, bands_offset__), nbeta,
+                                      ket__.at<CPU>(offs, bands_offset__), nbeta,
                                       operator__.at<CPU>(packed_mtrx_offsets__(ia)), nbf);
 
                 }

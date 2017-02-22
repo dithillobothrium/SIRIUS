@@ -31,6 +31,7 @@
 #include "force.h"
 #include "json.hpp"
 #include "Geometry/Forces_PS.h"
+#include "Geometry/Stress_PS.h"
 
 using json = nlohmann::json;
 
@@ -81,6 +82,8 @@ class DFT_ground_state
             }
 
             forces_ = std::unique_ptr<Forces_PS>(new Forces_PS(&ctx_, &density_, &potential_, &kset_));
+
+            Stress_PS stresss(&ctx_, &density_, &potential_, &kset_);
         }
 
         mdarray<double, 2> forces();

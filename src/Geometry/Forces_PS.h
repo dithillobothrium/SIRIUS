@@ -15,8 +15,7 @@
 #include "../Beta_projectors/beta_projectors_gradient.h"
 #include "../potential.h"
 #include "../density.h"
-#include "../Operator/Operator.h"
-
+#include "Chunk_linalg.h"
 #include "Nonlocal_forces.h"
 
 namespace sirius
@@ -120,7 +119,7 @@ class Forces_PS
                                     return unit_cell.atom(ia).d_mtrx(i, j, ispn) - kpoint.band_energy(ibnd) *
                                             ctx_->augmentation_op(iat).q_mtrx(i, j);
                                 } else {
-                                    return unit_cell.atom(ia).d_mtrx(i, j, ispn) - kpoint.band_energy(ibnd);
+                                    return unit_cell.atom(ia).d_mtrx(i, j, ispn);
                                 }
                                 };
 

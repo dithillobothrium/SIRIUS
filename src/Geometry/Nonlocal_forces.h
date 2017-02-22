@@ -4,8 +4,8 @@
 #include <memory>
 
 #include "../simulation_context.h"
-#include "../Operator/Operator.h"
 #include "../k_point.h"
+#include "Chunk_linalg.h"
 
 namespace sirius
 {
@@ -120,18 +120,26 @@ void Nonlocal_forces<T>::calc_contribution_to_forces_matrix(int ispn__,
     // |bq> = Q * |beta>
     if( operator_Q_->processing_unit() == CPU)
     {
-        mdarray<T, 1> op(operator_D_->operator_matrix_unsafe().template at<CPU>(0,0),
-                           operator_D_->operator_matrix_unsafe().size(0)  );
+        mdarray<T, 1> op(operator_Q_->operator_matrix_unsafe().template at<CPU>(0,0),
+                           operator_Q_->operator_matrix_unsafe().size(0)  );
 
         test::Chunk_linalg<CPU,T>::apply_op_to_chunked_state(op,
-                                                             operator_D_->packed_mtrx_offset(),
+                                                             operator_Q_->packed_mtrx_offset(),
                                                              chunk__,
                                                              bp_phi_chunk__,
-                                                             beta_phi_D_,
+                                                             beta_phi_Q_,
                                                              bands_offset__,
                                                              num_bands__);
     }
 
+
+//    for(int ibnd = bands_offset__; ibnd < bands_offset__ + num_bands__; ibnd++)
+//    {
+//        for(int ibeta = 0; ibeta < chunk__.num_beta_; ibeta++)
+//        {
+//            std::cout<<beta_phi_D_(ibeta, ibnd)<<" ";
+//        }
+//    }
     // |bd> += E(bnd) * |bq>
     #pragma omp parallel for
     for(int ibnd = bands_offset__; ibnd < bands_offset__ + num_bands__; ibnd++)
@@ -139,7 +147,7 @@ void Nonlocal_forces<T>::calc_contribution_to_forces_matrix(int ispn__,
         for(int ibeta = 0; ibeta < chunk__.num_beta_; ibeta++)
         {
             beta_phi_D_(ibeta, ibnd) = kpoint_->band_occupancy(ibnd + ispn__ * ctx_->num_fv_states()) *
-                    ( beta_phi_D_(ibeta, ibnd) + kpoint_->band_energy(ibnd) * beta_phi_Q_(ibeta, ibnd) );
+                    ( beta_phi_D_(ibeta, ibnd) - kpoint_->band_energy(ibnd) * beta_phi_Q_(ibeta, ibnd) );
         }
     }
 
@@ -150,7 +158,7 @@ void Nonlocal_forces<T>::calc_contribution_to_forces_matrix(int ispn__,
         if(pu_ == CPU)
         {
             test::Chunk_linalg<CPU,T>::chunked_states_product(0, 2, chunk__,
-                                                              bp_phi_chunk__,
+                                                              beta_phi_D_,
                                                               bp_grad_phi_chunk__[comp],
                                                               forces_matrix_[comp],
                                                               forces_mtrx_offset_,
@@ -177,7 +185,7 @@ void Nonlocal_forces<T>::calc_contribution_to_forces(mdarray<double,2>& forces__
             int offs = chunk__.desc_(1, i);
             int ia = chunk__.desc_(3, i);
 
-            std::cout<<ia<<" "<<comp;
+//            std::cout<<ia<<" "<<comp;
             for(int ibf = 0; ibf < nbf; ibf++ )
             {
 //                for(int jbf = 0; jbf < nbf; jbf++ )
@@ -185,9 +193,20 @@ void Nonlocal_forces<T>::calc_contribution_to_forces(mdarray<double,2>& forces__
                     forces__(comp, ia) += forces_matrix_[comp](forces_mtrx_offset_(ia) + ibf * nbf + ibf).real();
 //                }
             }
-            std::cout<<" "<<forces__(comp, ia)<<std::endl;
+            //std::cout<<" "<<forces__(comp, ia)<<std::endl;
 
             forces__(comp, ia) *= factor * kpoint_->weight();
+
+
+            for(int ibf = 0; ibf < nbf; ibf++ )
+            {
+                for(int jbf = 0; jbf < nbf; jbf++ )
+                {
+                    std::cout<<forces_matrix_[comp](forces_mtrx_offset_(ia) + ibf * nbf + jbf)<<" \t";
+                }
+                std::cout<<std::endl;
+            }
+            std::cout<<std::endl;
         }
     }
 
