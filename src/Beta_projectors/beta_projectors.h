@@ -214,6 +214,11 @@ class Beta_projectors
             return max_num_beta_;
         }
 
+        int num_beta_by_atom_types()
+        {
+            return num_beta_t_;
+        }
+
         void prepare()
         {
             #ifdef __GPU

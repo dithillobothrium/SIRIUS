@@ -156,6 +156,12 @@ class Stress_radial_integrals
             return atom_type_radial_integrals_[key](iqdq.first, iqdq.second);
         }
 
+        inline double beta_radial_integral(const Lpair_spline_map::iterator& it__, double q__)
+        {
+            auto iqdq = iqdq_gkmax(q__);
+            return it__->second(iqdq.first, iqdq.second);
+        }
+
         /// return pairs < idxrf - radial function index, l2 - quantum number>
         inline const std::vector<lpair>& radial_integrals_lpairs()
         {
@@ -185,11 +191,7 @@ class Stress_radial_integrals
             return std::make_pair(atom_type_radial_integrals_.begin(), atom_type_radial_integrals_.end());
         }
 
-        inline double beta_radial_integral(const Lpair_spline_map::iterator& it__, double q__)
-        {
-            auto iqdq = iqdq_gkmax(q__);
-            return it__->second(iqdq.first, iqdq.second);
-        }
+
 };
 
 }
