@@ -13,7 +13,9 @@
 #include <memory>
 #include <algorithm>
 
-#include "sbessel.h"
+#include "../sbessel.h"
+
+#include "Radial_integrals_base.h"
 
 namespace sirius {
 
@@ -36,53 +38,19 @@ using Lpair_spline_map = std::unordered_map<lpair, Spline<double>, lpair_hash >;
 /// generates and stores splines in G-space of beta radial integrals according to
 /// l-selection rules for Gaunt coefficients { {l(idxrf), 1, l2} , {m1, m, m2}}
 /// idxrf - radial function index, l2 - quantum number of J Bessel function
-class Stress_radial_integrals
+class Stress_radial_integrals : public Radial_integrals_base
 {
     private:
-        /// Basic parameters.
-        const Simulation_parameters* param_;
-
-        /// Unit cell.
-        const Unit_cell* unit_cell_;
-
-        /// Linear grid up to |G+k|_{max}
-        Radial_grid grid_gkmax_;
-
-        /// Linear grid up to |G|_{max}
-        Radial_grid grid_gmax_;
-
         Lpair_spline_map atom_type_radial_integrals_;
 
         std::vector<lpair> radial_integrals_lpairs_;
 
-        inline std::pair<int, double> iqdq_gkmax(double q__) const
-            {
-            std::pair<int, double> result;
-            result.first = static_cast<int>((grid_gkmax_.num_points() - 1) * q__ / param_->gk_cutoff());
-            /* delta q = q - q_i */
-            result.second = q__ - grid_gkmax_[result.first];
-            return std::move(result);
-            }
-
-        inline std::pair<int, double> iqdq_gmax(double q__) const
-            {
-            std::pair<int, double> result;
-            result.first = static_cast<int>((grid_gmax_.num_points() - 1) * q__ / param_->pw_cutoff());
-            /* delta q = q - q_i */
-            result.second = q__ - grid_gmax_[result.first];
-            return std::move(result);
-            }
-
     public:
         /// Constructor.
-        Stress_radial_integrals(const Simulation_parameters* param__,
+        Stress_radial_integrals(const Simulation_context* ctx__,
                               const Unit_cell* unit_cell__)
-        : param_(param__)
-        , unit_cell_(unit_cell__)
-        {
-            grid_gmax_  = Radial_grid(linear_grid, static_cast<int>(12 * param_->pw_cutoff()), 0, param_->pw_cutoff());
-            grid_gkmax_ = Radial_grid(linear_grid, static_cast<int>(12 * param_->gk_cutoff()), 0, param_->gk_cutoff());
-        }
+        : Radial_integrals_base(ctx__, unit_cell__)
+        { }
 
         /// generate beta radial integral splines for given atom type index
         inline void generate_beta_radial_integrals(int atom_type_idx__)
@@ -90,53 +58,39 @@ class Stress_radial_integrals
             PROFILE("sirius::Base_radial_integrals::generate_beta_radial_stress_integrals");
 
             int iat = atom_type_idx__;
-
             atom_type_radial_integrals_.clear();
             radial_integrals_lpairs_.clear();
-
             auto& atom_type = unit_cell_->atom_type(iat);
-
             int nrb = atom_type.mt_radial_basis_size();
 
-
-            for (int idxrf = 0; idxrf < nrb; idxrf++)
-            {
+            for (int idxrf = 0; idxrf < nrb; idxrf++){
                 int l  = atom_type.indexr(idxrf).l;
-
                 std::vector<int> l2s;
 
-                if( l == 0)
-                {
+                if( l == 0){
                     l2s.push_back(1);
-                }
-                else
-                {
+                } else {
                     l2s.push_back(l-1);
                     l2s.push_back(l+1);
                 }
 
                 // create radial spline
                 Spline<double> rdist(atom_type.radial_grid());
-
                 int nr = atom_type.pp_desc().num_beta_radial_points[idxrf];
 
-                for (int ir = 0; ir < nr; ir++)
-                {
+                for (int ir = 0; ir < nr; ir++){
                     rdist[ir] = atom_type.pp_desc().beta_radial_functions(ir, idxrf);
                 }
 
                 rdist.interpolate();
 
                 // create g-grid spline
-                for(auto l2 : l2s)
-                {
+                for(auto l2 : l2s){
                     Spline<double> gdist(grid_gkmax_);
 
-                    for (int iq = 0; iq < grid_gkmax_.num_points(); iq++)
-                    {
+                    for (int iq = 0; iq < grid_gkmax_.num_points(); iq++){
                         // just for a case since
                         Spherical_Bessel_functions jl(unit_cell_->lmax() + 1, atom_type.radial_grid(), grid_gkmax_[iq]);
-
                         // compute \int j_l2(|G+k|r) beta_l(r) r^3 dr
                         // remeber that beta(r) are defined as miltiplied by r
                         gdist[iq] = sirius::inner(jl[l2], rdist, 2, nr);

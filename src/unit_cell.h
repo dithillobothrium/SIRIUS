@@ -347,6 +347,11 @@ class Unit_cell
         /** Return vector of plane-wave coefficients */
         inline std::vector<double_complex> make_periodic_function(mdarray<double, 2>& form_factors__, Gvec const& gvec__) const;
 
+        inline void make_periodic_function_local(mdarray<double_complex>& f_pw_local__,
+                                                 splindex<block>& spl_ngv__,
+                                                 mdarray<double, 2> const& form_factors__,
+                                                 Gvec const& gvec__) const;
+
         inline int atom_id_by_position(vector3d<double> position__)
         {
             for (int ia = 0; ia < num_atoms(); ia++) {
@@ -1382,6 +1387,32 @@ inline std::vector<double_complex> Unit_cell::make_periodic_function(mdarray<dou
     comm_.allgather(&f_pw[0], spl_ngv.global_offset(), spl_ngv.local_size());
 
     return std::move(f_pw);
+}
+
+
+
+inline void Unit_cell::make_periodic_function_local(mdarray<double_complex>& f_pw_local__,
+                                                    splindex<block>& spl_ngv__,
+                                                    mdarray<double, 2> const& form_factors__,
+                                                    Gvec const& gvec__) const
+{
+    PROFILE("sirius::Unit_cell::make_periodic_function");
+
+    assert((int)form_factors__.size(0) == num_atom_types());
+
+    double fourpi_omega = fourpi / omega();
+
+    #pragma omp parallel for
+    for (int igloc = 0; igloc < spl_ngv__.local_size(); igloc++) {
+        int ig = spl_ngv__[igloc];
+        int igs = gvec__.shell(ig);
+
+        for (int ia = 0; ia < num_atoms(); ia++) {
+            int iat = atom(ia).type_id();
+            double_complex z = std::exp(double_complex(0.0, twopi * (gvec__.gvec(ig) * atom(ia).position())));
+            f_pw_local__(igloc) += fourpi_omega * std::conj(z) * form_factors__(iat, igs);
+        }
+    }
 }
 
 } // namespace

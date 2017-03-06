@@ -41,15 +41,13 @@ class Beta_projectors_array
         {
             initialize();
 
-            if( ! is_initialized_ )
-            {
+            if( ! is_initialized_ ){
                 TERMINATE("error in Beta_projectors_array: components array are not initialized!");
             }
 
             // Postinit: on GPU we create arrays without allocation, it will before use
             #ifdef __GPU
-            for(int comp=0; comp<N; comp++)
-            {
+            for(int comp=0; comp<N; comp++){
                 chunk_comp_gk_a_gpu_[comp] = matrix<double_complex>( bp_->num_gkvec_loc() , bp_->max_num_beta() , memory_t::none);
             }
             #endif
@@ -62,16 +60,14 @@ class Beta_projectors_array
 
         void generate(int chunk__, int calc_component__)
         {
-            if (bp_->proc_unit() == CPU)
-            {
+            if (bp_->proc_unit() == CPU){
                 chunk_comp_gk_a_[calc_component__] = mdarray<double_complex, 2>(&components_gk_a_[calc_component__](0, bp_->beta_chunk(chunk__).offset_),
                                                                                 bp_->num_gkvec_loc(),
                                                                                 bp_->beta_chunk(chunk__).num_beta_);
             }
 
             #ifdef __GPU
-            if (bp_->proc_unit() == GPU)
-            {
+            if (bp_->proc_unit() == GPU){
                 chunk_comp_gk_a_[calc_component__] = mdarray<double_complex, 2>(&components_gk_a_[calc_component__](0, bp_->beta_chunk(chunk__).offset_),
                                                                                 chunk_comp_gk_a_gpu_[calc_component__].at<GPU>(),
                                                                                 bp_->num_gkvec_loc(),
@@ -82,8 +78,7 @@ class Beta_projectors_array
             #endif
         }
 
-        void generate(int chunk__)
-        {
+        void generate(int chunk__){
             for(int comp=0; comp<N; comp++) {
                 generate(chunk__, comp);
             }
@@ -131,10 +126,8 @@ class Beta_projectors_array
         void prepare()
         {
             #ifdef __GPU
-            if (bp_->proc_unit() == GPU)
-            {
-                for(int comp=0; comp<N; comp++)
-                {
+            if (bp_->proc_unit() == GPU){
+                for(int comp=0; comp<N; comp++){
                     chunk_comp_gk_a_gpu_[comp].allocate(memory_t::device);
                     beta_phi_[comp].allocate(memory_t::device);
                 }
@@ -145,10 +138,8 @@ class Beta_projectors_array
         void dismiss()
         {
             #ifdef __GPU
-            if (bp_->proc_unit() == GPU)
-            {
-                for(int comp=0; comp<N; comp++)
-                {
+            if (bp_->proc_unit() == GPU){
+                for(int comp=0; comp<N; comp++){
                     chunk_comp_gk_a_gpu_[comp].deallocate_on_device();
                     beta_phi_[comp].deallocate_on_device();
                 }
