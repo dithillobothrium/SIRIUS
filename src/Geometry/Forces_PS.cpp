@@ -34,8 +34,7 @@ void Forces_PS::calc_local_forces(mdarray<double,2>& forces)
 
     //mdarray<double_complex, 2> vloc_G_comp(unit_cell.num_atoms(), spl_ngv.local_size() );
 
-    if (forces.size(0) != 3 || (int)forces.size(1) != unit_cell.num_atoms())
-    {
+    if (forces.size(0) != 3 || (int)forces.size(1) != unit_cell.num_atoms()){
         TERMINATE("forces array has wrong number of elements");
     }
 
@@ -45,15 +44,13 @@ void Forces_PS::calc_local_forces(mdarray<double,2>& forces)
 
     // here the calculations are in lattice vectors space
     #pragma omp parallel for
-    for (int ia = 0; ia < unit_cell.num_atoms(); ia++)
-    {
+    for (int ia = 0; ia < unit_cell.num_atoms(); ia++){
         Atom &atom = unit_cell.atom(ia);
 
         int iat = atom.type_id();
 
         // mpi distributed
-        for (int igloc = 0; igloc < gvec_count; igloc++)
-        {
+        for (int igloc = 0; igloc < gvec_count; igloc++){
             int ig = gvec_offset + igloc;
 
             int igs = gvecs.shell(ig);
@@ -91,8 +88,7 @@ void Forces_PS::calc_nlcc_forces(mdarray<double,2>& forces)
     Periodic_function<double>* xc_pot = potential_->xc_potential();
 
     // check because it is not allocated in dft loop
-    if ( !xc_pot->is_f_pw_allocated() )
-    {
+    if ( !xc_pot->is_f_pw_allocated() ){
         xc_pot->allocate_pw();
     }
 
@@ -114,15 +110,12 @@ void Forces_PS::calc_nlcc_forces(mdarray<double,2>& forces)
 
     // here the calculations are in lattice vectors space
     #pragma omp parallel for
-    for (int ia = 0; ia < unit_cell.num_atoms(); ia++)
-    {
+    for (int ia = 0; ia < unit_cell.num_atoms(); ia++){
         Atom &atom = unit_cell.atom(ia);
-
         int iat = atom.type_id();
 
         // mpi distributed
-        for (int igloc = 0; igloc < gvec_count; igloc++)
-        {
+        for (int igloc = 0; igloc < gvec_count; igloc++){
             int ig = gvec_offset + igloc;
 
             int igs = gvecs.shell(ig);
@@ -175,18 +168,15 @@ void Forces_PS::calc_ultrasoft_forces(mdarray<double,2>& forces)
 
     // iterate over atoms
     #pragma omp parallel for
-    for (int ia = 0; ia < unit_cell.num_atoms(); ia++)
-    {
+    for (int ia = 0; ia < unit_cell.num_atoms(); ia++){
         Atom &atom = unit_cell.atom(ia);
 
         int iat = atom.type_id();
-        if (!unit_cell.atom_type(iat).pp_desc().augment)
-        {
+        if (!unit_cell.atom_type(iat).pp_desc().augment){
             continue;
         }
 
-        for (int igloc = 0; igloc < gvec_count; igloc++)
-        {
+        for (int igloc = 0; igloc < gvec_count; igloc++){
             int ig = gvec_offset + igloc;
 
             // fractional form for calculation of scalar product with atomic position
@@ -204,12 +194,9 @@ void Forces_PS::calc_ultrasoft_forces(mdarray<double,2>& forces)
             const Augmentation_operator &aug_op = ctx_->augmentation_op(iat);
 
             // iterate over trangle matrix Qij
-            for (int ib2 = 0; ib2 < atom.type().indexb().size(); ib2++)
-            {
-                for(int ib1 = 0; ib1 <= ib2; ib1++)
-                {
+            for (int ib2 = 0; ib2 < atom.type().indexb().size(); ib2++){
+                for(int ib1 = 0; ib1 <= ib2; ib1++){
                     int iqij = (ib2 * (ib2 + 1)) / 2 + ib1;
-
                     double diag_fact = ib1 == ib2 ? 1.0 : 2.0;
 
                     //  [omega * V_conj(G) * exp(-i G Rn) ] * rho_ij * Qij(G)
@@ -243,10 +230,8 @@ void Forces_PS::calc_nonlocal_forces(mdarray<double,2>& forces)
 
     auto& spl_num_kp = kset_->spl_num_kpoints();
 
-    for(int ikploc=0; ikploc < spl_num_kp.local_size() ; ikploc++)
-    {
+    for(int ikploc=0; ikploc < spl_num_kp.local_size() ; ikploc++){
         K_point *kp = kset_->k_point(spl_num_kp[ikploc]);
-
         add_k_point_contribution_to_nonlocal<double_complex>(*kp, unsym_forces);
     }
 
@@ -262,16 +247,14 @@ void Forces_PS::calc_nonlocal_forces(mdarray<double,2>& forces)
 template<typename T>
 void init_mdarray2d(mdarray<T,2> &priv, mdarray<T,2> &orig )
 {
-    priv = mdarray<double,2>(orig.size(0),orig.size(1)); priv.zero();
+    priv = mdarray<T,2>(orig.size(0),orig.size(1)); priv.zero();
 }
 
 template<typename T>
 void add_mdarray2d(mdarray<T,2> &in, mdarray<T,2> &out)
 {
-    for(size_t i = 0; i < in.size(1); i++ )
-    {
-        for(size_t j = 0; j < in.size(0); j++ )
-        {
+    for(size_t i = 0; i < in.size(1); i++ ){
+        for(size_t j = 0; j < in.size(0); j++ ){
             out(j,i) += in(j,i);
         }
     }
@@ -297,12 +280,10 @@ void Forces_PS::calc_ewald_forces(mdarray<double,2>& forces)
 
     //mpi
     #pragma omp parallel for reduction( + : forces )
-    for (int igloc = 0; igloc < ctx_->gvec_count(); igloc++)
-    {
+    for (int igloc = 0; igloc < ctx_->gvec_count(); igloc++){
         int ig = ctx_->gvec_offset() + igloc;
 
-        if( ig == 0 )
-        {
+        if( ig == 0 ){
             continue;
         }
 
@@ -313,20 +294,17 @@ void Forces_PS::calc_ewald_forces(mdarray<double,2>& forces)
 
         double_complex rho(0, 0);
 
-        for (int ja = 0; ja < unit_cell.num_atoms(); ja++)
-        {
+        for (int ja = 0; ja < unit_cell.num_atoms(); ja++){
             rho += ctx_->gvec_phase_factor(ig, ja) * static_cast<double>(unit_cell.atom(ja).zn());
         }
 
         rho = std::conj(rho);
 
-        for (int ja = 0; ja < unit_cell.num_atoms(); ja++)
-        {
+        for (int ja = 0; ja < unit_cell.num_atoms(); ja++){
             double scalar_part = prefac * (rho * ctx_->gvec_phase_factor(ig, ja)).imag() *
                     static_cast<double>(unit_cell.atom(ja).zn()) * std::exp(-g2 / (4 * alpha) ) / g2;
 
-            for(int x: {0,1,2})
-            {
+            for(int x: {0,1,2}){
                 forces(x,ja) += scalar_part * gvec_cart[x];
             }
         }
@@ -338,10 +316,8 @@ void Forces_PS::calc_ewald_forces(mdarray<double,2>& forces)
     double invpi = 1. / pi;
 
     #pragma omp parallel for
-    for (int ia = 0; ia < unit_cell.num_atoms(); ia++)
-    {
-        for (int i = 1; i < unit_cell.num_nearest_neighbours(ia); i++)
-        {
+    for (int ia = 0; ia < unit_cell.num_atoms(); ia++){
+        for (int i = 1; i < unit_cell.num_nearest_neighbours(ia); i++){
             int ja = unit_cell.nearest_neighbour(i, ia).atom_id;
 
             double d = unit_cell.nearest_neighbour(i, ia).distance;
@@ -354,8 +330,7 @@ void Forces_PS::calc_ewald_forces(mdarray<double,2>& forces)
                           ( gsl_sf_erfc(std::sqrt(alpha) * d) / d  +  2.0 * std::sqrt(alpha * invpi ) * std::exp( - d2 * alpha ) );
 
 
-            for(int x: {0,1,2})
-            {
+            for(int x: {0,1,2}){
                 forces(x,ia) += scalar_part * t[x];
             }
         }
@@ -373,18 +348,13 @@ void Forces_PS::symmetrize_forces(mdarray<double,2>& unsym_forces, mdarray<doubl
     sym_forces.zero();
 
     #pragma omp parallel for
-    for(int ia = 0; ia < (int)unsym_forces.size(1); ia++)
-    {
+    for(int ia = 0; ia < (int)unsym_forces.size(1); ia++){
         vector3d<double> cart_force(&unsym_forces(0,ia) );
-
         vector3d<double> lat_force = inverse_lattice_vectors * (cart_force / (double)ctx_->unit_cell().symmetry().num_mag_sym());
 
-        for (int isym = 0; isym < ctx_->unit_cell().symmetry().num_mag_sym(); isym++)
-        {
+        for (int isym = 0; isym < ctx_->unit_cell().symmetry().num_mag_sym(); isym++){
             int ja = ctx_->unit_cell().symmetry().sym_table(ia,isym);
-
             auto &R = ctx_->unit_cell().symmetry().magnetic_group_symmetry(isym).spg_op.R;
-
             vector3d<double> rot_force = lattice_vectors * ( R * lat_force );
 
             #pragma omp atomic update
@@ -427,8 +397,7 @@ mdarray<double,2> Forces_PS::sum_forces()
 
 void Forces_PS::sum_forces(mdarray<double,2>& inout_total_forces)
 {
-    if(inout_total_forces.size() != local_forces_.size())
-    {
+    if(inout_total_forces.size() != local_forces_.size()){
         TERMINATE("ERROR: Passed total forces array has wrong length!");
     }
 

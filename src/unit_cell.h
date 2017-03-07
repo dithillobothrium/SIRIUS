@@ -347,7 +347,7 @@ class Unit_cell
         /** Return vector of plane-wave coefficients */
         inline std::vector<double_complex> make_periodic_function(mdarray<double, 2>& form_factors__, Gvec const& gvec__) const;
 
-        inline void make_periodic_function_local(mdarray<double_complex>& f_pw_local__,
+        inline void make_periodic_function_local(mdarray<double_complex, 1>& f_pw_local__,
                                                  splindex<block>& spl_ngv__,
                                                  mdarray<double, 2> const& form_factors__,
                                                  Gvec const& gvec__) const;
@@ -1391,12 +1391,12 @@ inline std::vector<double_complex> Unit_cell::make_periodic_function(mdarray<dou
 
 
 
-inline void Unit_cell::make_periodic_function_local(mdarray<double_complex>& f_pw_local__,
+inline void Unit_cell::make_periodic_function_local(mdarray<double_complex, 1>& f_pw_local__,
                                                     splindex<block>& spl_ngv__,
                                                     mdarray<double, 2> const& form_factors__,
                                                     Gvec const& gvec__) const
 {
-    PROFILE("sirius::Unit_cell::make_periodic_function");
+    PROFILE("sirius::Unit_cell::make_periodic_function_local");
 
     assert((int)form_factors__.size(0) == num_atom_types());
 
