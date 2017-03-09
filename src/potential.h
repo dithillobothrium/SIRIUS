@@ -872,7 +872,7 @@ class Potential
             return paw_one_elec_energy_;
         }
 
-        mdarray<double, 2> const& get_vloc_radial_integrals()
+        mdarray<double, 2> const& vloc_radial_integrals()
         {
             return vloc_radial_integrals_;
         }

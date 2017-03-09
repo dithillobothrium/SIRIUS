@@ -55,6 +55,7 @@ class DFT_ground_state
         Band band_;
 
         std::unique_ptr<Forces_PS> forces_;
+        std::unique_ptr<Stress_PS> stress_;
 
         int use_symmetry_;
 
@@ -83,7 +84,7 @@ class DFT_ground_state
 
             forces_ = std::unique_ptr<Forces_PS>(new Forces_PS(&ctx_, &density_, &potential_, &kset_));
 
-            Stress_PS stresss(&ctx_, &density_, &potential_, &kset_);
+            stress_ = std::unique_ptr<Stress_PS>(new Stress_PS(&ctx_, &density_, &potential_, &kset_));
         }
 
         mdarray<double, 2> forces();
@@ -423,6 +424,8 @@ inline void DFT_ground_state::forces(mdarray<double, 2>& inout_forces)
         std::cout<<"===== Forces: Ewald forces from ions =====" << std::endl;
         print_forces( forces_->ewald_forces() );
     }
+
+    stress_->calc_local_stress();
 }
 
 

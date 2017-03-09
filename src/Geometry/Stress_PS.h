@@ -22,6 +22,8 @@
 
 #include "../SDDK/geometry3d.hpp"
 
+#include <fstream>
+
 namespace sirius
 {
 
@@ -60,14 +62,14 @@ class Stress_PS
           potential_(potential__),
           kset_(kset__)
         {
-            Stress_radial_integrals rad_int(ctx_, &ctx_->unit_cell());
+            //Stress_radial_integrals rad_int(ctx_, &ctx_->unit_cell());
 
             // tmp
-            rad_int.generate_beta_radial_integrals(0);
+            //rad_int.generate_beta_radial_integrals(0);
 
-            Beta_projectors_lattice_gradient bplg(&kset_->k_point(0)->beta_projectors(), ctx__);
+            //Beta_projectors_lattice_gradient bplg(&kset_->k_point(0)->beta_projectors(), ctx__);
 
-            calc_local_stress();
+            //calc_local_stress();
 
 
         }
@@ -132,10 +134,15 @@ class Stress_PS
             #pragma omp parallel for reduction( + : sigma_loc )
             for(int igloc = 0; igloc < spl_ngv.local_size(); igloc++){
                 int ig = spl_ngv.global_offset() + igloc;
+
+                if( ig==0 ){
+                    continue;
+                }
+
                 auto gvec_cart = ctx_->gvec().gvec_cart(ig);
                 auto gvec_norm = gvec_cart.length();
 
-                double scalar_part = ( dvloc_dg_local(igloc) * std::conj( valence_rho->f_pw_local(ig) )).real() / gvec_norm;
+                double scalar_part = ( dvloc_dg_local(igloc) *  std::conj(valence_rho->f_pw_local(ig))  ).real() / gvec_norm;
 
                 for(int i=0; i<3; i++){
                     for(int j=0; j<=i; j++){
@@ -144,45 +151,42 @@ class Stress_PS
                 }
             }
 
+
             // if G-vectors are reduced
             double fact = ctx_->gvec().reduced() ? 2.0 : 1.0 ;
 
             // multiply by scalars
             for(int i=0; i<3; i++){
                 for(int j=0; j<=i; j++){
-                    sigma_loc_(i,j) *= fact * fourpi / ctx_->unit_cell().omega();
+                    sigma_loc_(i,j) *= fact;// * fourpi / ctx_->unit_cell().omega();
+                    sigma_loc_(j,i) = sigma_loc_(i,j);
                 }
             }
 
             // reduce over MPI (was distributed by G-vector)
             ctx_->comm().allreduce(&sigma_loc_(0,0), 9 );
 
-            // calc vloc energy
-            // TODO get it from the finished DFT loop
-            double vloc_energy = valence_rho->inner(&potential_->local_potential());
-
             //------------------------------------------
             // calc Evloc contributions to stress tensor
             //------------------------------------------
 
+            // TODO get it from the finished DFT loop
+            double vloc_energy = valence_rho->inner(&potential_->local_potential());
+
             for(int i: {0,1,2}){
                 sigma_loc_(i,i) += vloc_energy / ctx_->unit_cell().omega();
+            }
+
+            std::cout<<"local stress:"<<std::endl;
+            for(int i=0; i<3; i++){
+                for(int j=0; j<3; j++){
+                    std::cout<< sigma_loc_(i,j)<<" ";
+                }
+                std::cout<<std::endl;
             }
         }
 
 
-        // TODO use MKL and replace it to linalg?
-//        template<typename MultiplierFuncT>
-//        double_complex smart_zdot(double_complex* v1__, double_complex* v2__, size_t size, MultiplierFuncT func__)
-//        {
-//            double_complex res{0};
-//
-//            #pragma omp parallel for reduction(+:res)
-//            for (size_t i = 0; i < size; i++) {
-//                res += v1__[i] * std::conj(v2__[i]) * func__(i);
-//            }
-//
-//        }
 
 
 };

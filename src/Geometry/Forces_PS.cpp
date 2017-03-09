@@ -22,7 +22,7 @@ void Forces_PS::calc_local_forces(mdarray<double,2>& forces)
     // get main arrays
     const Periodic_function<double>* valence_rho = density_->rho();
 
-    const mdarray<double, 2>& vloc_radial_integrals = potential_->get_vloc_radial_integrals();
+    const mdarray<double, 2>& vloc_radial_integrals = potential_->vloc_radial_integrals();
 
     // other
     Unit_cell &unit_cell = ctx_->unit_cell();
@@ -232,7 +232,7 @@ void Forces_PS::calc_nonlocal_forces(mdarray<double,2>& forces)
 
     for(int ikploc=0; ikploc < spl_num_kp.local_size() ; ikploc++){
         K_point *kp = kset_->k_point(spl_num_kp[ikploc]);
-        add_k_point_contribution_to_nonlocal<double_complex>(*kp, unsym_forces);
+        add_k_point_contribution_to_nonlocal2<double_complex>(*kp, unsym_forces);
     }
 
     ctx_->comm().allreduce(&unsym_forces(0,0), static_cast<int>(unsym_forces.size()));
