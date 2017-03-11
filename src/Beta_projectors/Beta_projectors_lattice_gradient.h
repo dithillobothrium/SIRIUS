@@ -168,6 +168,7 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<6>
             for(int i = 0; i < this->num_; i++)
             {
                 components_gk_a_[i] = matrix<double_complex>(num_gkvec_loc, unit_cell.mt_lo_basis_size());
+                components_gk_a_[i].zero();
             }
 
             auto cell_matrix = unit_cell.lattice_vectors();
