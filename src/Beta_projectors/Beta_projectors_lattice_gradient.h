@@ -204,11 +204,12 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<6>
                     auto Gcart = bp_->gk_vectors().gvec_cart(igk);
 
                     for (int xi = 0; xi < unit_cell.atom(ia).mt_lo_basis_size(); xi++) {
+
                         // iteration over tensor components
                         for(int u = 0; u < nu_; u++){
                             for(int v = 0; v <= u; v++){
                                 // complicate formula
-                                components_gk_a_[ind(u,v)](igkloc, unit_cell.atom(ia).offset_lo() + xi) =
+                                components_gk_a_[ind(u,v)](igkloc, unit_cell.atom(ia).offset_lo() + xi) +=
                                         beta_gk_t_(igkloc, unit_cell.atom(ia).type().offset_lo() + xi, v) *
                                         phase_gk[igkloc] * Gcart[u] * const_fact -
                                         bp_->beta_gk_a()(igkloc, unit_cell.atom(ia).offset_lo() + xi) *
