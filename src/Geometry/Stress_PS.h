@@ -62,12 +62,12 @@ class Stress_PS
           potential_(potential__),
           kset_(kset__)
         {
-            //Stress_radial_integrals rad_int(ctx_, &ctx_->unit_cell());
+            Stress_radial_integrals rad_int(ctx_, &ctx_->unit_cell());
 
-            // tmp
-            //rad_int.generate_beta_radial_integrals(0);
 
-            //Beta_projectors_lattice_gradient bplg(&kset_->k_point(0)->beta_projectors(), ctx__);
+            rad_int.generate_beta_radial_integrals(0);
+
+            Beta_projectors_lattice_gradient bplg(&kset_->k_point(0)->beta_projectors(), ctx__);
 
             //calc_local_stress();
 

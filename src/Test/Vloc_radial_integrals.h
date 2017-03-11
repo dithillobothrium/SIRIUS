@@ -22,40 +22,23 @@ class Vloc_radial_integrals: public Radial_integrals_base
         matrix<double> vloc_radial_integrals_;
         matrix<double> g_gradient_vloc_radial_integrals_;
 
-
         template<class ConvolveFuncT>
-        double process_grad_for_nonzero_gshell(int igs, int iat, std::vector< Spline<double> >& sa, ConvolveFuncT func__)
+        inline void process_for_nonzero_gshell(int igs, int iat, std::vector< Spline<double> >& sa, ConvolveFuncT func__)
         {
                 auto& atom_type = unit_cell_->atom_type(iat);
-                double g = ctx_->gvec().shell_len(igs);
-                double g2 = std::pow(g, 2);
                 for (int ir = 0; ir < atom_type.num_mt_points(); ir++) {
                     double x = atom_type.radial_grid(ir);
-                    sa[iat][ir] = (x * atom_type.pp_desc().vloc[ir] + atom_type.zn() * gsl_sf_erf(x)) * func__(g , x);
+                    sa[iat][ir] = (x * atom_type.pp_desc().vloc[ir] + atom_type.zn() * gsl_sf_erf(x)) * func__( ctx_->gvec().shell_len(igs) , x);
                 }
-                return (sa[iat].interpolate().integrate(0) / g + 0.5 * atom_type.zn() * std::exp(-g2 / 4) / std::pow(g,3) * (4 + g2));
         }
 
-        template<class ConvolveFuncT>
-        double process_for_gshell(int igs, int iat, std::vector< Spline<double> >& sa, ConvolveFuncT func__)
+        inline void process_for_zero_gshell(int igs, int iat, std::vector< Spline<double> >& sa)
         {
-                if(igs == 0){
-                    auto& atom_type = unit_cell_->atom_type(iat);
-                    for (int ir = 0; ir < atom_type.num_mt_points(); ir++) {
-                        double x = atom_type.radial_grid(ir);
-                        sa[iat][ir] = (x * atom_type.pp_desc().vloc[ir] + atom_type.zn()) * x;
-                    }
-                    return sa[iat].interpolate().integrate(0);
-                } else {
-                    auto& atom_type = unit_cell_->atom_type(iat);
-                    double g = ctx_->gvec().shell_len(igs);
-                    double g2 = std::pow(g, 2);
-                    for (int ir = 0; ir < atom_type.num_mt_points(); ir++) {
-                        double x = atom_type.radial_grid(ir);
-                        sa[iat][ir] = (x * atom_type.pp_desc().vloc[ir] + atom_type.zn() * gsl_sf_erf(x)) * func__(g , x);
-                    }
-                    return (sa[iat].interpolate().integrate(0) / g - atom_type.zn() * std::exp(-g2 / 4) / g2);
-                }
+            auto& atom_type = unit_cell_->atom_type(iat);
+            for (int ir = 0; ir < atom_type.num_mt_points(); ir++) {
+                double x = atom_type.radial_grid(ir);
+                sa[iat][ir] = (x * atom_type.pp_desc().vloc[ir] + atom_type.zn()) * x;
+            }
         }
 
         template<class ProcessFuncT>
@@ -99,7 +82,15 @@ class Vloc_radial_integrals: public Radial_integrals_base
         {
             convolve_with_func( vloc_radial_integrals_, [&](int igs, int iat, std::vector< Spline<double> >& sa)
             {
-                vloc_radial_integrals_(iat, igs) = process_for_gshell(igs, iat, sa, [&](double g, double x){ return std::sin(g * x); } );
+                if(igs == 0){
+                    process_for_zero_gshell(igs, iat, sa);
+                    vloc_radial_integrals_(iat, igs) = sa[iat].interpolate().integrate(0);
+                } else {
+                    process_for_nonzero_gshell(igs, iat, sa, [&](double g, double x){ return std::sin(g * x); });
+                    double g = ctx_->gvec().shell_len(igs);
+                    double g2 = std::pow(g, 2);
+                    vloc_radial_integrals_(iat, igs) = (sa[iat].interpolate().integrate(0) / g - unit_cell_->atom_type(iat).zn() * std::exp(-g2 / 4) / g2);
+                }
             } );
         }
 
@@ -107,8 +98,15 @@ class Vloc_radial_integrals: public Radial_integrals_base
         {
             convolve_with_func( g_gradient_vloc_radial_integrals_, [&](int igs, int iat, std::vector< Spline<double> >& sa)
             {
-                g_gradient_vloc_radial_integrals_(iat, igs) = igs == 0 ? 0.0 :
-                        process_grad_for_nonzero_gshell(igs, iat, sa, [&](double g, double x){ return x * std::cos(g * x) - std::sin(g * x) / g; } );
+                if(igs == 0){
+                    g_gradient_vloc_radial_integrals_(iat, igs) = 0.0;
+                } else {
+                    process_for_nonzero_gshell(igs, iat, sa, [&](double g, double x){ return x * std::cos(g * x) - std::sin(g * x) / g; });
+                    double g = ctx_->gvec().shell_len(igs);
+                    double g2 = std::pow(g, 2);
+                    g_gradient_vloc_radial_integrals_(iat, igs) = sa[iat].interpolate().integrate(0) / g +
+                            0.5 * unit_cell_->atom_type(iat).zn() * std::exp(-g2 / 4) / std::pow(g,3) * (4 + g2);
+                }
             } );
         }
 

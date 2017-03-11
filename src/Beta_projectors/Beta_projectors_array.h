@@ -18,6 +18,8 @@ class Beta_projectors_array
 {
     protected:
 
+        static const int num_ = N;
+
         /// local array of gradient components. dimensions: 0 - gk, 1-orbitals
         std::array<matrix<double_complex>, N> components_gk_a_;
 
