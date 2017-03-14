@@ -18,8 +18,6 @@ class Beta_projectors_array
 {
     protected:
 
-        static const int num_ = N;
-
         /// local array of gradient components. dimensions: 0 - gk, 1-orbitals
         std::array<matrix<double_complex>, N> components_gk_a_;
 
@@ -34,31 +32,23 @@ class Beta_projectors_array
 
         Beta_projectors *bp_;
 
-        bool is_initialized_{false};
-
     public:
+
+        static const int num_ = N;
 
         Beta_projectors_array(Beta_projectors* bp)
         : bp_(bp)
         {
-            initialize();
-
-            if( ! is_initialized_ ){
-                TERMINATE("error in Beta_projectors_array: components array are not initialized!");
-            }
-
-            // Postinit: on GPU we create arrays without allocation, it will before use
-            #ifdef __GPU
+            // on GPU we create arrays without allocation, it will before use
             for(int comp=0; comp<N; comp++){
+                components_gk_a_[comp] = matrix<double_complex>( bp_->beta_gk_a().size(0), bp_->beta_gk_a().size(1) );
+                #ifdef __GPU
                 chunk_comp_gk_a_gpu_[comp] = matrix<double_complex>( bp_->num_gkvec_loc() , bp_->max_num_beta() , memory_t::none);
+                #endif
             }
-            #endif
-        }
-
-        virtual void initialize()
-        {
 
         }
+
 
         void generate(int chunk__, int calc_component__)
         {
@@ -116,9 +106,9 @@ class Beta_projectors_array
         }
 
         template <typename T>
-        std::array<matrix<T>,3> beta_phi(int chunk__, int n__)
+        std::array<matrix<T>,N> beta_phi(int chunk__, int n__)
         {
-            std::array<matrix<T>,3> chunk_beta_phi;
+            std::array<matrix<T>,N> chunk_beta_phi;
 
             for(int comp=0; comp<N; comp++) chunk_beta_phi[comp] = beta_phi<T>(chunk__, n__, comp);
 

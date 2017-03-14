@@ -17,6 +17,7 @@
 #include "../density.h"
 #include "Chunk_linalg.h"
 #include "Nonlocal_forces.h"
+#include "Non_local_functor.h"
 
 namespace sirius
 {
@@ -101,11 +102,6 @@ class Forces_PS
                         int offs = bp.beta_chunk(icnk).desc_(1, ia_chunk);
                         int nbf = bp.beta_chunk(icnk).desc_(0, ia_chunk);
                         int iat = unit_cell.atom(ia).type_id();
-
-                        //                    linalg<CPU>::gemm(0, 0, nbf, n__, nbf,
-                        //                                      op_.at<CPU>(packed_mtrx_offset_(ia), ispn__), nbf,
-                        //                                      beta_phi.at<CPU>(offs, 0), nbeta,
-                        //                                      work_.at<CPU>(offs), nbeta);
 
                         // mpi
                         // TODO make in smart way with matrix multiplication
@@ -248,6 +244,19 @@ class Forces_PS
         #endif
         }
 
+        template<typename T>
+        void add_k_point_contribution_to_nonlocal3(K_point& kpoint, mdarray<double,2>& forces)
+        {
+            Beta_projectors_gradient bp_grad(&kpoint.beta_projectors());
+
+            Non_local_functor<T,Beta_projectors_gradient::num_> nlf(ctx_,kset_,&bp_grad);
+
+            nlf.add_k_point_contribution(kpoint,[&](int comp__, int ia__, double_complex val__)
+                                         {
+                                             forces(comp__, ia__) += val__.real();
+                                         });
+        }
+
         void symmetrize_forces(mdarray<double,2>& unsym_forces, mdarray<double,2>& sym_forces );
 
     public:
@@ -255,17 +264,17 @@ class Forces_PS
                   Density* density__,
                   Potential* potential__,
                   K_point_set* kset__)
-    : ctx_(ctx__)
-    , density_(density__)
-    , potential_(potential__)
-    , kset_(kset__)
-    {
-            local_forces_     = mdarray<double,2>(3, ctx_->unit_cell().num_atoms());
-            ultrasoft_forces_ = mdarray<double,2>(3, ctx_->unit_cell().num_atoms());
-            nonlocal_forces_  = mdarray<double,2>(3, ctx_->unit_cell().num_atoms());
-            nlcc_forces_      = mdarray<double,2>(3, ctx_->unit_cell().num_atoms());
-            ewald_forces_     = mdarray<double,2>(3, ctx_->unit_cell().num_atoms());
-    }
+        : ctx_(ctx__)
+        , density_(density__)
+        , potential_(potential__)
+        , kset_(kset__)
+        {
+                local_forces_     = mdarray<double,2>(3, ctx_->unit_cell().num_atoms());
+                ultrasoft_forces_ = mdarray<double,2>(3, ctx_->unit_cell().num_atoms());
+                nonlocal_forces_  = mdarray<double,2>(3, ctx_->unit_cell().num_atoms());
+                nlcc_forces_      = mdarray<double,2>(3, ctx_->unit_cell().num_atoms());
+                ewald_forces_     = mdarray<double,2>(3, ctx_->unit_cell().num_atoms());
+        }
 
         void calc_local_forces(mdarray<double,2>& forces);
 

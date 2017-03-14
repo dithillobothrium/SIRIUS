@@ -22,11 +22,6 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<6>
 
         mdarray<double_complex, 3> beta_gk_t_;
 
-        int ind(int i, int j)
-        {
-            return j*this->num_ + i;
-        }
-
         // dimensions of a 3d matrix (f.e. stress tensor)
         const int nu_ = 3;
         const int nv_ = 3;
@@ -46,16 +41,13 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<6>
         : Beta_projectors_array<6>(bp__),
           ctx_(ctx__)
         {
-            initialize();
-        }
-
-
-        virtual void initialize()
-        {
             init_beta_gk_t();
             init_beta_gk();
+        }
 
-            this->is_initialized_ = true;
+        int ind(int i, int j)
+        {
+            return num_ - (nu_ - i)*(nu_ - i + 1) / 2 + j - i ;
         }
 
         void init_beta_gk_t()
@@ -165,9 +157,9 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<6>
             auto& unit_cell = ctx_->unit_cell();
             int num_gkvec_loc = bp_->num_gkvec_loc();
 
+            // TODO maybe remove it
             for(int i = 0; i < this->num_; i++)
             {
-                components_gk_a_[i] = matrix<double_complex>(num_gkvec_loc, unit_cell.mt_lo_basis_size());
                 components_gk_a_[i].zero();
             }
 
@@ -200,33 +192,32 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<6>
 
                 // TODO: need to optimize order of loops
                 // calc beta lattice gradient
-                for (int igkloc = 0; igkloc < bp_->num_gkvec_loc(); igkloc++) {
-                    int igk = bp_->gk_vectors().gvec_offset(bp_->comm().rank()) + igkloc;
-                    auto Gcart = bp_->gk_vectors().gvec_cart(igk);
-
-                    for (int xi = 0; xi < unit_cell.atom(ia).mt_lo_basis_size(); xi++) {
+                for (int xi = 0; xi < unit_cell.atom(ia).mt_lo_basis_size(); xi++) {
+                    for (int igkloc = 0; igkloc < bp_->num_gkvec_loc(); igkloc++) {
+                        int igk = bp_->gk_vectors().gvec_offset(bp_->comm().rank()) + igkloc;
+                        auto Gcart = bp_->gk_vectors().gvec_cart(igk);
 
                         // iteration over tensor components
                         for(int u = 0; u < nu_; u++){
                             for(int v = 0; v <= u; v++){
                                 // complicate formula
                                 components_gk_a_[ind(u,v)](igkloc, unit_cell.atom(ia).offset_lo() + xi) +=
+                                        // first
                                         beta_gk_t_(igkloc, unit_cell.atom(ia).type().offset_lo() + xi, v) *
                                         phase_gk[igkloc] * Gcart[u] * const_fact -
+                                        // second
                                         bp_->beta_gk_a()(igkloc, unit_cell.atom(ia).offset_lo() + xi) *
                                         double_complex(0.0 , 1.0) * vk_cart[u] * Rcart[v] / omega;
                             }
-
+                            // third
                             components_gk_a_[ind(u,u)](igkloc, unit_cell.atom(ia).offset_lo() + xi) +=
                                     bp_->beta_gk_a()(igkloc, unit_cell.atom(ia).offset_lo() + xi) / omega * 0.5;
                         }
-
-
                     }
                 }
             }
-
         }
+
 
 
 };

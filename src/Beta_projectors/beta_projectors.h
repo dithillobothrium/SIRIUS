@@ -56,8 +56,6 @@ class Beta_projectors_gradient;
 /// Stores <G+k | beta> expansion
 class Beta_projectors
 {
-    friend class Beta_projectors_gradient;
-
     public:
         struct beta_chunk_t
         {
@@ -116,14 +114,7 @@ class Beta_projectors
                     
         void split_in_chunks();
 
-        /// calculates < Beta | Psi > inner product
-        template <typename T>
-        void inner(int chunk__,
-                   wave_functions& phi__,
-                   int idx0__,
-                   int n__,
-                   mdarray<double_complex, 2>& beta_gk__,
-                   mdarray<double, 1>& beta_phi__);
+
 
     public:
 
@@ -202,6 +193,15 @@ class Beta_projectors
         }
 
         void generate(int chunk__);
+
+        /// calculates < Beta | Psi > inner product
+        template <typename T>
+        void inner(int chunk__,
+                   wave_functions& phi__,
+                   int idx0__,
+                   int n__,
+                   mdarray<double_complex, 2>& beta_gk__,
+                   mdarray<double, 1>& beta_phi__);
 
         template <typename T>
         void inner(int chunk__, wave_functions& phi__, int idx0__, int n__)

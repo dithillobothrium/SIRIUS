@@ -22,6 +22,8 @@
 
 #include "../SDDK/geometry3d.hpp"
 
+#include "Non_local_functor.h"
+
 #include <fstream>
 
 namespace sirius
@@ -51,6 +53,7 @@ class Stress_PS
         K_point_set* kset_;
 
         geometry3d::matrix3d<double> sigma_loc_;
+        geometry3d::matrix3d<double> sigma_non_loc_;
 
     public:
         Stress_PS(Simulation_context* ctx__,
@@ -62,12 +65,6 @@ class Stress_PS
           potential_(potential__),
           kset_(kset__)
         {
-            Stress_radial_integrals rad_int(ctx_, &ctx_->unit_cell());
-
-
-            rad_int.generate_beta_radial_integrals(0);
-
-            Beta_projectors_lattice_gradient bplg(&kset_->k_point(0)->beta_projectors(), ctx__);
 
             //calc_local_stress();
 
@@ -187,6 +184,47 @@ class Stress_PS
         }
 
 
+
+        void calc_non_local_stress()
+        {
+            Stress_radial_integrals rad_int(ctx_, &ctx_->unit_cell());
+
+            rad_int.generate_beta_radial_integrals(0);
+
+            auto& spl_num_kp = kset_->spl_num_kpoints();
+
+            std::cout<<"nl stress start"<<std::endl;
+            for(int ikploc=0; ikploc < spl_num_kp.local_size() ; ikploc++){
+                K_point* kp = kset_->k_point(spl_num_kp[ikploc]);
+                Beta_projectors_lattice_gradient bplg(&kp->beta_projectors(), ctx_);
+                Non_local_functor<double_complex, Beta_projectors_lattice_gradient::num_> nlf(ctx_,kset_,&bplg);
+
+                std::vector<double> stress_nl(bplg.num_, 0.0);
+
+                nlf.add_k_point_contribution(*kp, [&](int comp__, int ia__, double_complex val__)
+                                             {
+                                                 stress_nl[comp__] += val__.real();
+                                             });
+
+                for(int i=0; i<3; i++){
+                    for(int j=0; j<=i; j++){
+                        sigma_loc_(i,j) += stress_nl[bplg.ind(i,j)];
+                        sigma_loc_(j,i) = sigma_loc_(i,j);
+                    }
+                }
+            }
+
+
+
+
+            std::cout<<"non-local stress:"<<std::endl;
+            for(int i=0; i<3; i++){
+                for(int j=0; j<3; j++){
+                    std::cout<< sigma_loc_(i,j)<<" ";
+                }
+                std::cout<<std::endl;
+            }
+        }
 
 
 };

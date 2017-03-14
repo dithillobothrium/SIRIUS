@@ -232,7 +232,7 @@ void Forces_PS::calc_nonlocal_forces(mdarray<double,2>& forces)
 
     for(int ikploc=0; ikploc < spl_num_kp.local_size() ; ikploc++){
         K_point *kp = kset_->k_point(spl_num_kp[ikploc]);
-        add_k_point_contribution_to_nonlocal2<double_complex>(*kp, unsym_forces);
+        add_k_point_contribution_to_nonlocal3<double_complex>(*kp, unsym_forces);
     }
 
     ctx_->comm().allreduce(&unsym_forces(0,0), static_cast<int>(unsym_forces.size()));

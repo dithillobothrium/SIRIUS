@@ -426,6 +426,7 @@ inline void DFT_ground_state::forces(mdarray<double, 2>& inout_forces)
     }
 
     stress_->calc_local_stress();
+    stress_->calc_non_local_stress();
 }
 
 
