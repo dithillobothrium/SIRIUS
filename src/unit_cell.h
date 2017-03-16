@@ -79,7 +79,7 @@ class Unit_cell
          */
         matrix3d<double> lattice_vectors_;
         
-        /// Inverse Bravais lattice vectors in column order.
+        /// Inverse matrix of Bravais lattice vectors.
         /** This matrix is used to find fractional coordinates by Cartesian coordinates:
          *  \f[
          *    \vec v_{f} = {\bf L}^{-1} \vec v_{C}
@@ -156,7 +156,7 @@ class Unit_cell
         int max_mt_lo_basis_size_{0};
 
         /// List of nearest neighbours for each atom.
-        std::vector< std::vector<nearest_neighbour_descriptor> > nearest_neighbours_;
+        std::vector<std::vector<nearest_neighbour_descriptor>> nearest_neighbours_;
 
         /// Minimum muffin-tin radius.
         double min_mt_radius_{0};
@@ -345,12 +345,11 @@ class Unit_cell
 
         /// Make periodic function out of form factors.
         /** Return vector of plane-wave coefficients */
-        inline std::vector<double_complex> make_periodic_function(mdarray<double, 2>& form_factors__, Gvec const& gvec__) const;
+        inline std::vector<double_complex> make_periodic_function(mdarray<double, 2>& form_factors__,
+                                                                  Gvec const& gvec__) const;
 
-        inline void make_periodic_function_local(mdarray<double_complex, 1>& f_pw_local__,
-                                                 splindex<block>& spl_ngv__,
-                                                 mdarray<double, 2> const& form_factors__,
-                                                 Gvec const& gvec__) const;
+        inline std::vector<double_complex> make_periodic_function(std::function<double(int, double)> form_factors__,
+                                                                  Gvec const& gvec__) const;
 
         inline int atom_id_by_position(vector3d<double> position__)
         {
@@ -607,6 +606,11 @@ class Unit_cell
         inline matrix3d<double> const& lattice_vectors() const
         {
             return lattice_vectors_;
+        }
+
+        inline matrix3d<double> const& inverse_lattice_vectors() const
+        {
+            return inverse_lattice_vectors_;
         }
 
         inline matrix3d<double> const& reciprocal_lattice_vectors() const
@@ -1389,30 +1393,32 @@ inline std::vector<double_complex> Unit_cell::make_periodic_function(mdarray<dou
     return std::move(f_pw);
 }
 
-
-
-inline void Unit_cell::make_periodic_function_local(mdarray<double_complex, 1>& f_pw_local__,
-                                                    splindex<block>& spl_ngv__,
-                                                    mdarray<double, 2> const& form_factors__,
-                                                    Gvec const& gvec__) const
+inline std::vector<double_complex> Unit_cell::make_periodic_function(std::function<double(int, double)> form_factors__,
+                                                                     Gvec const& gvec__) const
 {
-    PROFILE("sirius::Unit_cell::make_periodic_function_local");
+    PROFILE("sirius::Unit_cell::make_periodic_function");
 
-    assert((int)form_factors__.size(0) == num_atom_types());
+    std::vector<double_complex> f_pw(gvec__.num_gvec(), double_complex(0, 0));
 
     double fourpi_omega = fourpi / omega();
 
+    splindex<block> spl_ngv(gvec__.num_gvec(), comm_.size(), comm_.rank());
+
     #pragma omp parallel for
-    for (int igloc = 0; igloc < spl_ngv__.local_size(); igloc++) {
-        int ig = spl_ngv__[igloc];
-        int igs = gvec__.shell(ig);
+    for (int igloc = 0; igloc < spl_ngv.local_size(); igloc++) {
+        int ig = spl_ngv[igloc];
+        double g = gvec__.gvec_len(ig);
 
         for (int ia = 0; ia < num_atoms(); ia++) {
             int iat = atom(ia).type_id();
             double_complex z = std::exp(double_complex(0.0, twopi * (gvec__.gvec(ig) * atom(ia).position())));
-            f_pw_local__(igloc) += fourpi_omega * std::conj(z) * form_factors__(iat, igs);
+            f_pw[ig] += fourpi_omega * std::conj(z) * form_factors__(iat, g);
         }
     }
+
+    comm_.allgather(&f_pw[0], spl_ngv.global_offset(), spl_ngv.local_size());
+
+    return std::move(f_pw);
 }
 
 } // namespace

@@ -22,8 +22,6 @@ void Forces_PS::calc_local_forces(mdarray<double,2>& forces)
     // get main arrays
     const Periodic_function<double>* valence_rho = density_->rho();
 
-    const mdarray<double, 2>& vloc_radial_integrals = potential_->vloc_radial_integrals();
-
     // other
     Unit_cell &unit_cell = ctx_->unit_cell();
 
@@ -32,9 +30,8 @@ void Forces_PS::calc_local_forces(mdarray<double,2>& forces)
     int gvec_count = gvecs.gvec_count(ctx_->comm().rank());
     int gvec_offset = gvecs.gvec_offset(ctx_->comm().rank());
 
-    //mdarray<double_complex, 2> vloc_G_comp(unit_cell.num_atoms(), spl_ngv.local_size() );
 
-    if (forces.size(0) != 3 || (int)forces.size(1) != unit_cell.num_atoms()){
+    if (forces.size(0) != 3 || (int)forces.size(1) != unit_cell.num_atoms()) {
         TERMINATE("forces array has wrong number of elements");
     }
 
@@ -63,7 +60,7 @@ void Forces_PS::calc_local_forces(mdarray<double,2>& forces)
             vector3d<double> gvec_cart = gvecs.gvec_cart(ig);
 
             // scalar part of a force without multipying by G-vector
-            double_complex z = fact * fourpi * vloc_radial_integrals(iat, igs) * std::conj( valence_rho->f_pw(ig) ) *
+            double_complex z = fact * fourpi * ctx_->radial_integrals().vloc_radial_integral(iat, gvecs.gvec_len(ig)) * std::conj(valence_rho->f_pw(ig)) *
                     std::exp(double_complex(0.0, - twopi * (gvec * atom.position())));
 
             // get force components multiplying by cartesian G-vector ( -image part goes from formula)
@@ -84,18 +81,11 @@ void Forces_PS::calc_nlcc_forces(mdarray<double,2>& forces)
 {
     PROFILE("sirius::Forces_PS::calc_nlcc_force");
 
-    // get main arrays
-    Periodic_function<double>* xc_pot = potential_->xc_potential();
+    /* get main arrays */
+    auto xc_pot = potential_->xc_potential();
 
-    // check because it is not allocated in dft loop
-    if ( !xc_pot->is_f_pw_allocated() ){
-        xc_pot->allocate_pw();
-    }
-
-    // transform from real space to reciprocal
+    /* transform from real space to reciprocal */
     xc_pot->fft_transform(-1);
-
-    const mdarray<double, 2>&  rho_core_radial_integrals = density_->rho_pseudo_core_radial_integrals();
 
     Unit_cell &unit_cell = ctx_->unit_cell();
 
@@ -128,8 +118,8 @@ void Forces_PS::calc_nlcc_forces(mdarray<double,2>& forces)
             vector3d<double> gvec_cart = gvecs.gvec_cart(ig);
 
             // scalar part of a force without multipying by G-vector
-            double_complex z = fact * fourpi * rho_core_radial_integrals(iat, igs) * std::conj( xc_pot->f_pw(ig) ) *
-                    std::exp(double_complex(0.0, - twopi * (gvec * atom.position())));
+            double_complex z = fact * fourpi * ctx_->radial_integrals().pseudo_core_radial_integral(iat, gvecs.gvec_len(ig)) *
+                               std::conj(xc_pot->f_pw(ig)) * std::exp(double_complex(0.0, -twopi * (gvec * atom.position())));
 
             // get force components multiplying by cartesian G-vector ( -image part goes from formula)
             forces(0, ia) -= (gvec_cart[0] * z).imag();
@@ -228,11 +218,14 @@ void Forces_PS::calc_nonlocal_forces(mdarray<double,2>& forces)
     unsym_forces.zero();
     forces.zero() ;
 
-    auto& spl_num_kp = kset_->spl_num_kpoints();
-
     for(int ikploc=0; ikploc < spl_num_kp.local_size() ; ikploc++){
-        K_point *kp = kset_->k_point(spl_num_kp[ikploc]);
-        add_k_point_contribution_to_nonlocal3<double_complex>(*kp, unsym_forces);
+        K_point *kp = kset_.k_point(spl_num_kp[ikploc]);
+        
+        if (ctx_.gamma_point()) {
+            add_k_point_contribution_to_nonlocal3<double>(*kp, unsym_forces);
+        } else {
+            add_k_point_contribution_to_nonlocal3<double_complex>(*kp, unsym_forces);
+        }
     }
 
     ctx_->comm().allreduce(&unsym_forces(0,0), static_cast<int>(unsym_forces.size()));

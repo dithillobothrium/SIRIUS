@@ -95,7 +95,7 @@ class Periodic_function: public Smooth_periodic_function<T>
             }
         }
         
-        /// is plane wave part allocated?
+        /// True if plane wave part is allocated.
         bool is_f_pw_allocated_{false};
 
     public:
@@ -113,10 +113,7 @@ class Periodic_function: public Smooth_periodic_function<T>
             , angular_domain_size_(angular_domain_size__)
         {
             if (allocate_pw__) {
-                is_f_pw_allocated_ = true;
-                f_pw_ = mdarray<double_complex, 1>(gvec_.num_gvec());
-                this->f_pw_local_ = mdarray<double_complex, 1>(&f_pw_[this->gvec().partition().gvec_offset_fft()],
-                                                               this->fft_->local_size());
+                allocate_pw();
             }
 
             if (parameters_.full_potential()) {
@@ -124,23 +121,23 @@ class Periodic_function: public Smooth_periodic_function<T>
             }
         }
         
-        /// check wether pw is allocated
-        bool is_f_pw_allocated()
-        {
-            return is_f_pw_allocated_;
-        }
+        ///// Check if PW array is allocated.
+        //bool is_f_pw_allocated() const
+        //{
+        //    return is_f_pw_allocated_;
+        //}
 
-        /// allocated memory for plane wave expansion coefficients
+        /// Allocated memory for the plane-wave expansion coefficients.
         void allocate_pw()
         {
             if (is_f_pw_allocated_) {
                 return;
             }
 
-            is_f_pw_allocated_ = true;
             f_pw_ = mdarray<double_complex, 1>(gvec_.num_gvec());
             this->f_pw_local_ = mdarray<double_complex, 1>(&f_pw_[this->gvec().partition().gvec_offset_fft()],
                                                            this->fft_->local_size());
+            is_f_pw_allocated_ = true;
         }
 
         /// Allocate memory for muffin-tin part.
@@ -206,7 +203,7 @@ class Periodic_function: public Smooth_periodic_function<T>
         {
             PROFILE("sirius::Periodic_function::add");
 
-            #pragma omp parallel for
+            #pragma omp parallel for schedule(static)
             for (int irloc = 0; irloc < this->fft_->local_size(); irloc++) {
                 this->f_rg_(irloc) += g->f_rg(irloc);
             }
@@ -228,7 +225,7 @@ class Periodic_function: public Smooth_periodic_function<T>
                 {
                     T it_val_t = 0;
                     
-                    #pragma omp for
+                    #pragma omp for schedule(static)
                     for (int irloc = 0; irloc < this->fft_->local_size(); irloc++) {
                         it_val_t += this->f_rg_(irloc);
                     }
@@ -480,7 +477,7 @@ class Periodic_function: public Smooth_periodic_function<T>
                 {
                     T rt{0};
                     
-                    #pragma omp for
+                    #pragma omp for schedule(static)
                     for (int irloc = 0; irloc < this->fft_->local_size(); irloc++) {
                         rt += type_wrapper<T>::conjugate(this->f_rg(irloc)) * g__->f_rg(irloc);
                     }
