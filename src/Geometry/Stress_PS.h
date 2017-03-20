@@ -187,9 +187,7 @@ class Stress_PS
 
         void calc_non_local_stress()
         {
-            Stress_radial_integrals rad_int(ctx_, &ctx_->unit_cell());
 
-            rad_int.generate_beta_radial_integrals(0);
 
             auto& spl_num_kp = kset_->spl_num_kpoints();
 
@@ -207,9 +205,9 @@ class Stress_PS
                                              });
 
                 for(int i=0; i<3; i++){
-                    for(int j=0; j<=i; j++){
-                        sigma_loc_(i,j) += stress_nl[bplg.ind(i,j)];
-                        sigma_loc_(j,i) = sigma_loc_(i,j);
+                    for(int j=0; j<3; j++){
+                        sigma_non_loc_(i,j) += stress_nl[bplg.ind(i,j)];
+                        //sigma_non_loc_(j,i) = sigma_non_loc_(i,j);
                     }
                 }
             }
@@ -220,7 +218,7 @@ class Stress_PS
             std::cout<<"non-local stress:"<<std::endl;
             for(int i=0; i<3; i++){
                 for(int j=0; j<3; j++){
-                    std::cout<< sigma_loc_(i,j)<<" ";
+                    std::cout<< sigma_non_loc_(i,j)<<" ";
                 }
                 std::cout<<std::endl;
             }

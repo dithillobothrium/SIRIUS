@@ -15,7 +15,7 @@
 namespace sirius
 {
 
-class Beta_projectors_lattice_gradient: public Beta_projectors_array<6>
+class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
 {
     protected:
         const Simulation_context* ctx_;
@@ -34,11 +34,11 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<6>
             int m1;
             int l2;
             int m2;
-            std::array<double, 3> gaunt_coefs;
+            std::array<double_complex, 3> prefac_gaunt_coefs;
         };
 
         Beta_projectors_lattice_gradient(Beta_projectors* bp__, const Simulation_context* ctx__)
-        : Beta_projectors_array<6>(bp__),
+        : Beta_projectors_array<9>(bp__),
           ctx_(ctx__)
         {
             init_beta_gk_t();
@@ -47,7 +47,8 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<6>
 
         int ind(int i, int j)
         {
-            return num_ - (nu_ - i)*(nu_ - i + 1) / 2 + j - i ;
+            return i * nu_ + j;
+            //return (i + 1) * i / 2 + j ;
         }
 
         void init_beta_gk_t()
@@ -57,6 +58,7 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<6>
             //const std::vector<lpair>& lpairs = rad_int.radial_integrals_lpairs();
             /* allocate array */
             beta_gk_t_ = mdarray<double_complex, 3>(bp_->num_gkvec_loc(), num_beta_t, nu_);
+            beta_gk_t_.zero();
 
             double const_prefac = fourpi * std::sqrt(fourpi / ( 3.0 * ctx_->unit_cell().omega() ));
 
@@ -65,43 +67,59 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<6>
             // compute
             for (int iat = 0; iat < ctx_->unit_cell().num_atom_types(); iat++){
                 auto& atom_type = ctx_->unit_cell().atom_type(iat);
-                Stress_radial_integrals rad_int(ctx_, &ctx_->unit_cell());
-                rad_int.generate_beta_radial_integrals(iat);
+                Stress_radial_integrals stress_radial_integrals(ctx_, &ctx_->unit_cell());
+                stress_radial_integrals.generate_beta_radial_integrals(iat);
 
                 // + 1 because max BesselJ l is lbeta + 1 in summation
                 int lmax_jl = atom_type.indexr().lmax() + 1;
 
                 // get iterators of radial integrals
-                auto rad_int_iterators = rad_int.radial_integral_iterators();
+                auto& rad_ints = stress_radial_integrals.beta_l2_integrals();
 
                 // TODO: make common array of gaunt coefs for all atom types
                 // array to store gaunt coeffs
                 std::vector<std::vector<beta_besselJ_gaunt_coefs_t>> beta_besselJ_gaunt_coefs;
 
+                int nrb = atom_type.mt_radial_basis_size();
+
                 // generate gaunt coeffs and store
-                for(auto rad_int_it = rad_int_iterators.first; rad_int_it != rad_int_iterators.second; rad_int_it++){
-                    lpair lp = rad_int_it->first;
-                    int idxrf = lp.first;
+                for (int idxrf = 0; idxrf < nrb; idxrf++){
                     int l1 = atom_type.indexr(idxrf).l;
-                    int l2 = lp.second;
                     std::vector<beta_besselJ_gaunt_coefs_t> bj_gc;
 
-                    for (int m1 = -l1; m1 <= l1; m1++){
-                        for (int m2 = -l2; m2 <= l2; m2++){
-                            bj_gc.push_back({
-                                l1,m1,l2,m2,
-                                {SHT::gaunt_rlm(l1, 1, l2, m1,  1, m2), // for x component
-                                        SHT::gaunt_rlm(l1, 1, l2, m1, -1, m2),  // for y component
-                                        SHT::gaunt_rlm(l1, 1, l2, m1,  0, m2)}  // for z component
-                            });
+                    std::cout<<"---------- "<<idxrf<<std::endl;
+
+                    for(auto& l2_rad_int: rad_ints[idxrf]){
+                        int l2 = l2_rad_int.l2;
+
+                        double_complex prefac = std::pow(double_complex(0.0, -1.0), l2);
+
+                        std::cout<<"l1l2 = "<<l1<<" "<<l2<<std::endl;
+
+                        for (int m1 = -l1; m1 <= l1; m1++){
+                            for (int m2 = -l2; m2 <= l2; m2++){
+                                beta_besselJ_gaunt_coefs_t gc{
+                                    l1,m1,l2,m2,
+                                    {
+                                            const_prefac * prefac * SHT::gaunt_rlm(l1, 1, l2, m1,  1, m2),     // for x component
+                                            const_prefac * prefac * SHT::gaunt_rlm(l1, 1, l2, m1, -1, m2),     // for y component
+                                            const_prefac * prefac * SHT::gaunt_rlm(l1, 1, l2, m1,  0, m2)      // for z component
+                                    }
+                                };
+                                std::cout<<"m1m2 = "<<m1<<" "<<m2<<std::endl;
+                                for(int comp: {0,1,2}) std::cout<<gc.prefac_gaunt_coefs[comp]<<" ";
+                                std::cout<<std::endl;
+
+                                bj_gc.push_back(std::move(gc));
+                            }
                         }
                     }
 
-                    beta_besselJ_gaunt_coefs.push_back(bj_gc);
+                    beta_besselJ_gaunt_coefs.push_back(std::move(bj_gc));
                 }
 
                 // iterate over gk vectors
-                #pragma omp parallel for private(rad_int_iterators)
+                #pragma omp parallel for
                 for (int igkloc = 0; igkloc < bp_->num_gkvec_loc(); igkloc++)
                 {
                     int igk   = bp_->gk_vectors().gvec_offset(bp_->comm().rank()) + igkloc;
@@ -114,39 +132,51 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<6>
                     std::vector<double> gkvec_rlm(Utils::lmmax(lmax_jl));
                     SHT::spherical_harmonics(lmax_jl, vs[1], vs[2], &gkvec_rlm[0]);
 
-                    // iterator over
-                    int beta_j_gc_it = 0;
-
                     // SHOULD WORK
-                    for(auto rad_int_it = rad_int_iterators.first; rad_int_it != rad_int_iterators.second; rad_int_it++){
-                        lpair lp = rad_int_it->first;
-                        int idxrf = lp.first;
+                    for (int idxrf = 0; idxrf < nrb; idxrf++){
                         int l1 = atom_type.indexr(idxrf).l;
-                        int l2 = lp.second;
-                        int idx_bf_start = atom_type.indexb().index_by_idxrf(idxrf);
+
+                        // m1-l2-m2 iterator for gaunt coefficients
+                        int m1l2m2_it = 0;
 
                         // get gaunt coefs between beta l1 and besselJ l2
-                        auto& bj_gc = beta_besselJ_gaunt_coefs[beta_j_gc_it++];
+                        auto& bj_gc = beta_besselJ_gaunt_coefs[idxrf];
 
-                        //TODO optimize std::pow
-                        // multiply radial integral and constants
-                        double_complex prefact = const_prefac * std::pow(double_complex(0, -1), l2) * rad_int.beta_radial_integral(rad_int_it, gk);
+                        for(auto& l2_rad_int: rad_ints[idxrf]){
+                            int l2 = l2_rad_int.l2;
 
-                        // get start index for basis functions
-                        int xi = atom_type.indexb().index_by_idxrf(idxrf);
+                            // multiply radial integral and constants
+                            double radint = stress_radial_integrals.integral_at(l2_rad_int.rad_int,gk);
 
-                        // m1-m2 iterator for gaunt coefficients
-                        int m1m2_it = 0;
+                            // get start index for basis functions
+                            int xi = atom_type.indexb().index_by_idxrf(idxrf);
 
-                        // iterate over m-components of l1 and l2
-                        for (int m1 = -l1; m1 <= l1; m1++, xi++){
-                            for (int m2 = -l2; m2 <= l2; m2++, m1m2_it++){
-                                for(int comp=0; comp< nu_; comp++){
-                                    beta_gk_t_(igkloc, atom_type.offset_lo() + xi, comp) += prefact *
-                                            gkvec_rlm[ Utils::lm_by_l_m(l2, m2) ] * bj_gc[ m1m2_it ].gaunt_coefs[comp];
+                            // iterate over m-components of l1 and l2
+                            for (int m1 = -l1; m1 <= l1; m1++, xi++){
+                                for (int m2 = -l2; m2 <= l2; m2++, m1l2m2_it++){
+                                    for(int comp=0; comp< nu_; comp++){
+                                        beta_gk_t_(igkloc, atom_type.offset_lo() + xi, comp) += radint *
+                                                gkvec_rlm[ Utils::lm_by_l_m(l2, m2) ] * bj_gc[ m1l2m2_it ].prefac_gaunt_coefs[comp];
+                                    }
                                 }
                             }
                         }
+
+                        // debug
+//                        int xi = atom_type.indexb().index_by_idxrf(idxrf);
+//                        auto Gcart = bp_->gk_vectors().gvec_cart(igk);
+
+//#pragma omp critical
+//                        {
+//                            for (int m1 = -l1; m1 <= l1; m1++, xi++){
+//                                std::cout<<"beta_gt_t "<<l1<<" "<<xi<<" | "<< Gcart<<" | ";
+//                                for(int comp=0; comp< nu_; comp++){
+//                                    std::cout<<beta_gk_t_(igkloc, atom_type.offset_lo() + xi, comp)<<" ";
+//                                }
+//                                std::cout<<std::endl;
+//                            }
+//                            std::cout<<"===================="<<std::endl;
+//                        }
                     }
                 }
             }
@@ -168,7 +198,7 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<6>
 
             double omega = unit_cell.omega();
 
-            double_complex const_fact = double_complex(0.0,1.0) / std::sqrt( std::pow( omega, 3));
+            double_complex i_over_omega = double_complex(0.0,1.0) / omega;
 
             #pragma omp parallel for
             for (int ia = 0; ia < unit_cell.num_atoms(); ia++) {
@@ -190,6 +220,12 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<6>
                 auto Rcart = cell_matrix * unit_cell.atom(ia).position();
                 auto vk_cart = inv_cell_matrix * vk;
 
+                std::cout<<"vk = "<<vk_cart<<std::endl;
+
+#pragma omp critical
+                {
+                std::cout<<"k R = "<<vk_cart<<"     "<<Rcart<<std::endl;
+                }
                 // TODO: need to optimize order of loops
                 // calc beta lattice gradient
                 for (int xi = 0; xi < unit_cell.atom(ia).mt_lo_basis_size(); xi++) {
@@ -199,19 +235,41 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<6>
 
                         // iteration over tensor components
                         for(int u = 0; u < nu_; u++){
-                            for(int v = 0; v <= u; v++){
+                            for(int v = 0; v < nv_; v++){
                                 // complicate formula
-                                components_gk_a_[ind(u,v)](igkloc, unit_cell.atom(ia).offset_lo() + xi) +=
+                                components_gk_a_[ind(u,v)](igkloc, unit_cell.atom(ia).offset_lo() + xi) =
                                         // first
                                         beta_gk_t_(igkloc, unit_cell.atom(ia).type().offset_lo() + xi, v) *
-                                        phase_gk[igkloc] * Gcart[u] * const_fact -
+                                        phase_gk[igkloc] * Gcart[u] * i_over_omega -
                                         // second
                                         bp_->beta_gk_a()(igkloc, unit_cell.atom(ia).offset_lo() + xi) *
                                         double_complex(0.0 , 1.0) * vk_cart[u] * Rcart[v] / omega;
+
+
                             }
                             // third
                             components_gk_a_[ind(u,u)](igkloc, unit_cell.atom(ia).offset_lo() + xi) +=
                                     bp_->beta_gk_a()(igkloc, unit_cell.atom(ia).offset_lo() + xi) / omega * 0.5;
+                        }
+
+#pragma omp critical
+                        {
+                            std::cout<<"test non-local stress:"<<std::endl;
+
+                                std::cout<<"G beta_gt= "<<Gcart<<"  |   ";
+                                for(int j=0; j<3; j++){
+                                    std::cout<<beta_gk_t_(igkloc, unit_cell.atom(ia).type().offset_lo() + xi, j) <<"  ";
+                                }
+                                std::cout<<std::endl;
+
+
+                            for(int i=0; i<3; i++){
+                                for(int j=0; j<3; j++){
+                                    std::cout<<beta_gk_t_(igkloc, unit_cell.atom(ia).type().offset_lo() + xi, j) * Gcart[i] <<"  ";
+                                }
+                                std::cout<<std::endl;
+                            }
+
                         }
                     }
                 }

@@ -218,10 +218,12 @@ void Forces_PS::calc_nonlocal_forces(mdarray<double,2>& forces)
     unsym_forces.zero();
     forces.zero() ;
 
+    auto& spl_num_kp = kset_->spl_num_kpoints();
+
     for(int ikploc=0; ikploc < spl_num_kp.local_size() ; ikploc++){
-        K_point *kp = kset_.k_point(spl_num_kp[ikploc]);
+        K_point *kp = kset_->k_point(spl_num_kp[ikploc]);
         
-        if (ctx_.gamma_point()) {
+        if (ctx_->gamma_point()) {
             add_k_point_contribution_to_nonlocal3<double>(*kp, unsym_forces);
         } else {
             add_k_point_contribution_to_nonlocal3<double_complex>(*kp, unsym_forces);

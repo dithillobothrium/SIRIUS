@@ -58,7 +58,7 @@ class Radial_integrals_base
             return std::move(result);
         }
 
-        inline double integral_at(Spline<double>& integral__, double q__)
+        inline double integral_at(const Spline<double>& integral__, double q__) const
         {
             auto iqdq = iqdq_gkmax(q__);
             return integral__(iqdq.first, iqdq.second);
