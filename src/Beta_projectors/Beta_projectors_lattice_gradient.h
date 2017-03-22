@@ -98,12 +98,13 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
 
                         for (int m1 = -l1; m1 <= l1; m1++){
                             for (int m2 = -l2; m2 <= l2; m2++){
+                                double_complex full_prefact = prefac * const_prefac ;//* std::pow(-1,m1) * std::pow(-1,m2) ;
                                 beta_besselJ_gaunt_coefs_t gc{
                                     l1,m1,l2,m2,
                                     {
-                                            const_prefac * prefac * SHT::gaunt_rlm(l1, 1, l2, m1,  1, m2),     // for x component
-                                            const_prefac * prefac * SHT::gaunt_rlm(l1, 1, l2, m1, -1, m2),     // for y component
-                                            const_prefac * prefac * SHT::gaunt_rlm(l1, 1, l2, m1,  0, m2)      // for z component
+                                             -full_prefact * SHT::gaunt_rlm(l1, l2, 1, m1, m2, 1),     // for x component
+                                             -full_prefact * SHT::gaunt_rlm(l1, l2, 1, m1, m2, -1),     // for y component
+                                              full_prefact * SHT::gaunt_rlm(l1, l2, 1, m1, m2, 0)      // for z component
                                     }
                                 };
                                 std::cout<<"m1m2 = "<<m1<<" "<<m2<<std::endl;
@@ -119,7 +120,7 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
                 }
 
                 // iterate over gk vectors
-                #pragma omp parallel for
+                //#pragma omp parallel for
                 for (int igkloc = 0; igkloc < bp_->num_gkvec_loc(); igkloc++)
                 {
                     int igk   = bp_->gk_vectors().gvec_offset(bp_->comm().rank()) + igkloc;
@@ -157,9 +158,12 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
                                     for(int comp=0; comp< nu_; comp++){
                                         beta_gk_t_(igkloc, atom_type.offset_lo() + xi, comp) += radint *
                                                 gkvec_rlm[ Utils::lm_by_l_m(l2, m2) ] * bj_gc[ m1l2m2_it ].prefac_gaunt_coefs[comp];
+                                        //std::cout<<m1l2m2_it<<" ";
                                     }
                                 }
                             }
+
+                            //std::cout<<"\n"<<bj_gc.size()<<std::endl;
                         }
 
                         // debug
@@ -198,9 +202,7 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
 
             double omega = unit_cell.omega();
 
-            double_complex i_over_omega = double_complex(0.0,1.0) / omega;
-
-            #pragma omp parallel for
+            //#pragma omp parallel for
             for (int ia = 0; ia < unit_cell.num_atoms(); ia++) {
 
                 // prepare G+k phases
@@ -229,7 +231,7 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
                 // TODO: need to optimize order of loops
                 // calc beta lattice gradient
                 for (int xi = 0; xi < unit_cell.atom(ia).mt_lo_basis_size(); xi++) {
-                    for (int igkloc = 0; igkloc < bp_->num_gkvec_loc(); igkloc++) {
+                    for (int igkloc = 0; igkloc < num_gkvec_loc; igkloc++) {
                         int igk = bp_->gk_vectors().gvec_offset(bp_->comm().rank()) + igkloc;
                         auto Gcart = bp_->gk_vectors().gvec_cart(igk);
 
@@ -239,17 +241,17 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
                                 // complicate formula
                                 components_gk_a_[ind(u,v)](igkloc, unit_cell.atom(ia).offset_lo() + xi) =
                                         // first
-                                        beta_gk_t_(igkloc, unit_cell.atom(ia).type().offset_lo() + xi, v) *
-                                        phase_gk[igkloc] * Gcart[u] * i_over_omega -
+                                        + beta_gk_t_(igkloc, unit_cell.atom(ia).type().offset_lo() + xi, v) *
+                                        phase_gk[igkloc] * Gcart[u] * double_complex(0.0 , 1.0) -
                                         // second
                                         bp_->beta_gk_a()(igkloc, unit_cell.atom(ia).offset_lo() + xi) *
-                                        double_complex(0.0 , 1.0) * vk_cart[u] * Rcart[v] / omega;
+                                         vk_cart[u] * Rcart[v] * double_complex(0.0 , 1.0);
 
 
                             }
                             // third
-                            components_gk_a_[ind(u,u)](igkloc, unit_cell.atom(ia).offset_lo() + xi) +=
-                                    bp_->beta_gk_a()(igkloc, unit_cell.atom(ia).offset_lo() + xi) / omega * 0.5;
+                            components_gk_a_[ind(u,u)](igkloc, unit_cell.atom(ia).offset_lo() + xi) -=
+                                    bp_->beta_gk_a()(igkloc, unit_cell.atom(ia).offset_lo() + xi)  * 0.5;
                         }
 
 #pragma omp critical
@@ -265,7 +267,7 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
 
                             for(int i=0; i<3; i++){
                                 for(int j=0; j<3; j++){
-                                    std::cout<<beta_gk_t_(igkloc, unit_cell.atom(ia).type().offset_lo() + xi, j) * Gcart[i] <<"  ";
+                                    std::cout<<components_gk_a_[ind(i,j)](igkloc, unit_cell.atom(ia).offset_lo() + xi) <<"  ";
                                 }
                                 std::cout<<std::endl;
                             }
@@ -276,8 +278,32 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
             }
         }
 
+//        (-2.34876,0)  (-0.654699,0)  (2.73832,0)
+//        (-0.622379,0)  (-0.173483,0)  (0.725605,0)
+//        (-2.60314,0)  (-0.725605,0)  (3.03489,0)
+
+//        (-2.34876,0)  (-0.654699,0)  (2.73832,0)
+//        (-0.622379,0)  (-0.173483,0)  (0.725605,0)
+//        (-2.60314,0)  (-0.725605,0)  (3.03489,0)
+
+//        0.0160462 -4.80154e-05 4.80152e-05
+//        -4.82059e-05 0.0160653 0.000113328
+//        -4.82057e-05 -0.000113328 0.0242675
+
+//        0.0236022 -0.000928755 3.24662e-05
+//        -0.00247025 0.037899 0.010908
+//        -3.48723e-05 -0.00311736 0.00859972
 
 
+//        G beta_gt= 3.91719 1.03798 4.34143  |   (0.0262012,0)  (-0.113641,0)  (0.475311,0)
+//        (-0.00360799,-0.00911274)  (0.00161593,0.00408137)  (-0.00675873,-0.0170706)
+//        (-9.8724e-05,-0.000249348)  (-0.00280723,-0.00709025)  (-0.00179094,-0.00452339)
+//        (-0.00041292,-0.00104292)  (0.00179094,0.00452339)  (-0.0107261,-0.0270911)
+
+//        G beta_gt= 3.91719 1.03798 4.34143  |   (-0.599604,0)  (-0.167135,0)  (0.699053,0)
+//        (0,-0.0225596)  (0,-0.00645594)  (0,0.0270024)
+//        (0,-0.00613723)  (0,-0.00110931)  (0,0.00715514)
+//        (0,-0.0256694)  (0,-0.00715514)  (0,0.0305282)
 };
 
 }

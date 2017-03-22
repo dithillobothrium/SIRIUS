@@ -197,16 +197,19 @@ class Stress_PS
                 Beta_projectors_lattice_gradient bplg(&kp->beta_projectors(), ctx_);
                 Non_local_functor<double_complex, Beta_projectors_lattice_gradient::num_> nlf(ctx_,kset_,&bplg);
 
-                std::vector<double> stress_nl(bplg.num_, 0.0);
+                mdarray<double, 1> stress_nl(bplg.num_);
+                stress_nl.zero();
+
+
 
                 nlf.add_k_point_contribution(*kp, [&](int comp__, int ia__, double_complex val__)
                                              {
-                                                 stress_nl[comp__] += val__.real();
+                                                 stress_nl(comp__) -= 1/ctx_->unit_cell().omega() * val__.real();
+                                                 //std::cout<< val__ <<std::endl;
                                              });
-
                 for(int i=0; i<3; i++){
                     for(int j=0; j<3; j++){
-                        sigma_non_loc_(i,j) += stress_nl[bplg.ind(i,j)];
+                        sigma_non_loc_(i,j) += stress_nl(bplg.ind(i,j));
                         //sigma_non_loc_(j,i) = sigma_non_loc_(i,j);
                     }
                 }
