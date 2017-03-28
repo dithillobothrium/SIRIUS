@@ -41,8 +41,8 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
         : Beta_projectors_array<9>(bp__),
           ctx_(ctx__)
         {
-            init_beta_gk_t();
-            init_beta_gk();
+            init_beta_gk_t2();
+            init_beta_gk2();
         }
 
         int ind(int i, int j)
@@ -98,13 +98,13 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
 
                         for (int m1 = -l1; m1 <= l1; m1++){
                             for (int m2 = -l2; m2 <= l2; m2++){
-                                double_complex full_prefact = prefac * const_prefac ;//* std::pow(-1,m1) * std::pow(-1,m2) ;
+                                double_complex full_prefact = prefac * const_prefac; //* std::pow(-1,m1) * std::pow(-1,m2) ;
                                 beta_besselJ_gaunt_coefs_t gc{
                                     l1,m1,l2,m2,
                                     {
-                                             -full_prefact * SHT::gaunt_rlm(l1, l2, 1, m1, m2, 1),     // for x component
+                                             -full_prefact * SHT::gaunt_rlm(l1, l2, 1, m1, m2,  1),     // for x component
                                              -full_prefact * SHT::gaunt_rlm(l1, l2, 1, m1, m2, -1),     // for y component
-                                              full_prefact * SHT::gaunt_rlm(l1, l2, 1, m1, m2, 0)      // for z component
+                                              full_prefact * SHT::gaunt_rlm(l1, l2, 1, m1, m2,  0)      // for z component
                                     }
                                 };
                                 std::cout<<"m1m2 = "<<m1<<" "<<m2<<std::endl;
@@ -278,32 +278,154 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
             }
         }
 
-//        (-2.34876,0)  (-0.654699,0)  (2.73832,0)
-//        (-0.622379,0)  (-0.173483,0)  (0.725605,0)
-//        (-2.60314,0)  (-0.725605,0)  (3.03489,0)
+        void init_beta_gk_t2()
+        {
+            int num_beta_t = bp_->num_beta_by_atom_types();
+            auto& unit_cell = ctx_->unit_cell();
 
-//        (-2.34876,0)  (-0.654699,0)  (2.73832,0)
-//        (-0.622379,0)  (-0.173483,0)  (0.725605,0)
-//        (-2.60314,0)  (-0.725605,0)  (3.03489,0)
+            /* allocate array */
+            beta_gk_t_ = mdarray<double_complex, 3>(bp_->num_gkvec_loc(), num_beta_t, this->num_);
+            //beta_gk_t_.zero();
 
-//        0.0160462 -4.80154e-05 4.80152e-05
-//        -4.82059e-05 0.0160653 0.000113328
-//        -4.82057e-05 -0.000113328 0.0242675
+            double fourpi_omega = fourpi / std::sqrt(unit_cell.omega());
 
-//        0.0236022 -0.000928755 3.24662e-05
-//        -0.00247025 0.037899 0.010908
-//        -3.48723e-05 -0.00311736 0.00859972
+            /* compute <G+k|beta> */
+            #pragma omp parallel for
+            for (int igkloc = 0; igkloc < bp_->num_gkvec_loc(); igkloc++) {
+                int igk   = bp_->gk_vectors().gvec_offset(bp_->comm().rank()) + igkloc;
+                double gk = bp_->gk_vectors().gvec_len(igk);
+                auto g_cart = bp_->gk_vectors().gvec_cart(igk);
+
+                /* vs = {r, theta, phi} */
+                auto vs = SHT::spherical_coordinates(bp_->gk_vectors().gkvec_cart(igk));
+
+                /* compute real spherical harmonics for G+k vector */
+                std::vector<double> gkvec_rlm_deriv_theta(Utils::lmmax(bp_->lmax_beta()));
+                std::vector<double> gkvec_rlm_deriv_phi(Utils::lmmax(bp_->lmax_beta()));
+
+                SHT::spherical_harmonics_deriv_theta(bp_->lmax_beta(), vs[1], vs[2], &gkvec_rlm_deriv_theta[0]);
+                SHT::spherical_harmonics_deriv_phi(bp_->lmax_beta(), vs[1], vs[2], &gkvec_rlm_deriv_phi[0]);
+
+                double cos_th = std::cos(vs[1]);
+                double cos_ph = std::cos(vs[2]);
+                double sin_th = std::sin(vs[1]);
+                double sin_ph = std::sin(vs[2]);
+
+                if(igk != 0 && std::abs(vs[1]) > 10e-8){
+                    for (int iat = 0; iat < unit_cell.num_atom_types(); iat++) {
+                        auto& atom_type = unit_cell.atom_type(iat);
+
+                        for (int xi = 0; xi < atom_type.mt_basis_size(); xi++) {
+                            int l     = atom_type.indexb(xi).l;
+                            int lm    = atom_type.indexb(xi).lm;
+                            int idxrf = atom_type.indexb(xi).idxrf;
+
+                            double_complex prefac_djldq = std::pow(double_complex(0, -1), l) * fourpi_omega *
+                                    ctx_->radial_integrals().beta_djldq_radial_integral(idxrf, iat, gk) /gk;
+
+                            double_complex prefac = std::pow(double_complex(0, -1), l) * fourpi_omega *
+                                    ctx_->radial_integrals().beta_radial_integral(idxrf, iat, gk);
+
+                            vector3d<double_complex> dRlm (
+                                    prefac * (-gkvec_rlm_deriv_theta[lm] * cos_th * cos_ph + gkvec_rlm_deriv_phi[lm] * sin_ph / sin_th ) / gk,
+                                    prefac * (-gkvec_rlm_deriv_theta[lm] * cos_th * sin_ph - gkvec_rlm_deriv_phi[lm] * cos_ph / sin_th ) / gk,
+                                    prefac * gkvec_rlm_deriv_theta[lm] * sin_th / gk
+                                    );
+
+                            for(int u = 0; u < nu_; u++){
+                                for(int v = 0; v < nv_; v++){
+                                    beta_gk_t_(igkloc, atom_type.offset_lo() + xi, ind(u,v)) =
+                                            prefac_djldq * g_cart[u] * g_cart[v] + g_cart[u] * dRlm[v];
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if(igk != 0 && std::abs(vs[1]) < 10e-8){
+                    for (int iat = 0; iat < unit_cell.num_atom_types(); iat++) {
+                        auto& atom_type = unit_cell.atom_type(iat);
 
 
-//        G beta_gt= 3.91719 1.03798 4.34143  |   (0.0262012,0)  (-0.113641,0)  (0.475311,0)
-//        (-0.00360799,-0.00911274)  (0.00161593,0.00408137)  (-0.00675873,-0.0170706)
-//        (-9.8724e-05,-0.000249348)  (-0.00280723,-0.00709025)  (-0.00179094,-0.00452339)
-//        (-0.00041292,-0.00104292)  (0.00179094,0.00452339)  (-0.0107261,-0.0270911)
+                        for (int xi = 0; xi < atom_type.mt_basis_size(); xi++) {
+                            int l     = atom_type.indexb(xi).l;
+                            int lm    = atom_type.indexb(xi).lm;
+                            int idxrf = atom_type.indexb(xi).idxrf;
 
-//        G beta_gt= 3.91719 1.03798 4.34143  |   (-0.599604,0)  (-0.167135,0)  (0.699053,0)
-//        (0,-0.0225596)  (0,-0.00645594)  (0,0.0270024)
-//        (0,-0.00613723)  (0,-0.00110931)  (0,0.00715514)
-//        (0,-0.0256694)  (0,-0.00715514)  (0,0.0305282)
+                            double_complex prefac_djldq = std::pow(double_complex(0, -1), l) * fourpi_omega *
+                                    ctx_->radial_integrals().beta_djldq_radial_integral(idxrf, iat, gk) /gk;
+
+                            for(int u = 0; u < nu_; u++){
+                                for(int v = 0; v < nv_; v++){
+                                    beta_gk_t_(igkloc, atom_type.offset_lo() + xi, ind(u,v)) =
+                                            prefac_djldq * g_cart[u] * g_cart[v];
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if(igk == 0 ){
+                    for (int iat = 0; iat < unit_cell.num_atom_types(); iat++) {
+                        auto& atom_type = unit_cell.atom_type(iat);
+
+                        for (int xi = 0; xi < atom_type.mt_basis_size(); xi++) {
+                            int l     = atom_type.indexb(xi).l;
+                            int lm    = atom_type.indexb(xi).lm;
+                            int idxrf = atom_type.indexb(xi).idxrf;
+
+                            for(int u = 0; u < nu_; u++){
+                                for(int v = 0; v < nv_; v++){
+                                    beta_gk_t_(igkloc, atom_type.offset_lo() + xi, ind(u,v)) = double_complex(0.0, 0.0);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        void init_beta_gk2()
+        {
+            auto& unit_cell = ctx_->unit_cell();
+            int num_gkvec_loc = bp_->num_gkvec_loc();
+
+            auto cell_matrix = unit_cell.lattice_vectors();
+            auto inv_cell_matrix = unit_cell.reciprocal_lattice_vectors();
+
+            #pragma omp for
+            for (int ia = 0; ia < unit_cell.num_atoms(); ia++) {
+                auto vk = bp_->gk_vectors().vk();
+                double phase = twopi * ( vk * unit_cell.atom(ia).position());
+                double_complex phase_k = std::exp(double_complex(0.0, phase));
+
+                std::vector<double_complex> phase_gk(num_gkvec_loc);
+                for (int igk_loc = 0; igk_loc < num_gkvec_loc; igk_loc++) {
+                    int igk = bp_->gk_vectors().gvec_offset(bp_->comm().rank()) + igk_loc;
+                    auto G = bp_->gk_vectors().gvec(igk);
+                    phase_gk[igk_loc] = std::conj(ctx_->gvec_phase_factor(G, ia) * phase_k);
+                }
+
+                // cartesian atomic coordinate and k-vector
+                auto r_cart = cell_matrix * unit_cell.atom(ia).position();
+                auto vk_cart = inv_cell_matrix * vk;
+
+                for (int xi = 0; xi < unit_cell.atom(ia).mt_lo_basis_size(); xi++) {
+                    for (int igk_loc = 0; igk_loc < num_gkvec_loc; igk_loc++) {
+                        for(int u = 0; u < nu_; u++){
+                            for(int v = 0; v < nv_; v++){
+                                components_gk_a_[ind(u,v)](igk_loc, unit_cell.atom(ia).offset_lo() + xi) =
+                                        beta_gk_t_(igk_loc, unit_cell.atom(ia).type().offset_lo() + xi, ind(2,v)) * phase_gk[igk_loc] -
+                                        double_complex(0.0,1.0) * vk_cart[u] * r_cart[v] *
+                                        bp_->beta_gk()(igk_loc, unit_cell.atom(ia).offset_lo() + xi);
+                            }
+                            components_gk_a_[ind(u,u)](igk_loc, unit_cell.atom(ia).offset_lo() + xi) -=
+                                    0.5 * bp_->beta_gk()(igk_loc, unit_cell.atom(ia).offset_lo() + xi);
+                        }
+                    }
+                }
+            }
+        }
 };
 
 }

@@ -328,6 +328,12 @@ class SHT // TODO: better name
          *    R[l_, m_, t_, p_] := Sum[a[m1, m]*SphericalHarmonicY[l, m1, t, p], {m1, -l, l}]
          *    \endverbatim
          */
+
+        /// Compute element of the real spherical harmonics theta derivative
+        static inline void spherical_harmonics_deriv_theta(int lmax, double theta, double phi, double* rlm);
+
+        static inline void spherical_harmonics_deriv_phi(int lmax, double theta, double phi, double* rlm);
+
         static inline double_complex ylm_dot_rlm(int l, int m1, int m2)
         {
             const double isqrt2 = 0.70710678118654752440;
@@ -830,6 +836,60 @@ inline void SHT::spherical_harmonics(int lmax, double theta, double phi, double*
     }
 }
                 
+
+inline void SHT::spherical_harmonics_deriv_theta(int lmax, double theta, double phi, double* rlm)
+{
+    int lmmax = (lmax + 1) * (lmax + 1);
+    std::vector<double_complex> ylm(lmmax);
+    spherical_harmonics(lmax, theta, phi, &ylm[0]);
+
+    double t = std::sqrt(2.0);
+
+    double cot_theta = std::tan(pi/2.0 - theta);
+    double_complex exp_minus_iphi = std::exp( double_complex(0, -phi) );
+
+    rlm[0] = 0.0;
+
+    for (int l = 1; l <= lmax; l++)
+    {
+        for (int m = -l; m < 0; m++){
+            rlm[Utils::lm_by_l_m(l, m)] = m * cot_theta * t * ylm[Utils::lm_by_l_m(l, m)].imag() +
+                    std::sqrt((l-m)*(l+m+1)) * (exp_minus_iphi * ylm[Utils::lm_by_l_m(l, m+1)] ).imag();
+        }
+
+        rlm[Utils::lm_by_l_m(l, 0)] = std::sqrt(l*(l+1)) * (exp_minus_iphi * ylm[Utils::lm_by_l_m(l, 1)]).real();
+
+        for (int m = 1; m < l; m++){
+            rlm[Utils::lm_by_l_m(l, m)] = m * cot_theta * t * ylm[Utils::lm_by_l_m(l, m)].real() +
+                    std::sqrt((l-m)*(l+m+1)) * (exp_minus_iphi * ylm[Utils::lm_by_l_m(l, m+1)] ).real();
+        }
+
+        rlm[Utils::lm_by_l_m(l, l)] = l * cot_theta * t * ylm[Utils::lm_by_l_m(l, l)].real();
+    }
+}
+
+inline void SHT::spherical_harmonics_deriv_phi(int lmax, double theta, double phi, double* rlm)
+{
+    int lmmax = (lmax + 1) * (lmax + 1);
+    std::vector<double_complex> ylm(lmmax);
+    spherical_harmonics(lmax, theta, phi, &ylm[0]);
+
+    double t = std::sqrt(2.0);
+
+    rlm[0] = 0.0;
+
+    for (int l = 1; l <= lmax; l++)
+    {
+        for (int m = -l; m < 0; m++)
+            rlm[Utils::lm_by_l_m(l, m)] = t * m * ylm[Utils::lm_by_l_m(l, m)].real();
+
+        rlm[Utils::lm_by_l_m(l, 0)] = 0.0;
+
+        for (int m = 1; m <= l; m++)
+            rlm[Utils::lm_by_l_m(l, m)] = - t * m * ylm[Utils::lm_by_l_m(l, m)].imag();
+    }
+}
+
 inline void SHT::uniform_coverage()
 {
     tp_(0, 0) = pi;
