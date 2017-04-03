@@ -41,8 +41,8 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
         : Beta_projectors_array<9>(bp__),
           ctx_(ctx__)
         {
-            init_beta_gk_t2();
-            init_beta_gk2();
+            init_beta_gk_t();
+            init_beta_gk();
         }
 
         int ind(int i, int j)
@@ -311,7 +311,7 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
                 double sin_th = std::sin(vs[1]);
                 double sin_ph = std::sin(vs[2]);
 
-                if(igk != 0 && std::abs(vs[1]) > 10e-8){
+                if(igk != 0 && std::abs(vs[1]) > 10e-9){
                     for (int iat = 0; iat < unit_cell.num_atom_types(); iat++) {
                         auto& atom_type = unit_cell.atom_type(iat);
 
@@ -324,25 +324,25 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
                                     ctx_->radial_integrals().beta_djldq_radial_integral(idxrf, iat, gk) /gk;
 
                             double_complex prefac = std::pow(double_complex(0, -1), l) * fourpi_omega *
-                                    ctx_->radial_integrals().beta_radial_integral(idxrf, iat, gk);
+                                    ctx_->radial_integrals().beta_radial_integral(idxrf, iat, gk) / gk;
 
-                            vector3d<double_complex> dRlm (
-                                    prefac * (-gkvec_rlm_deriv_theta[lm] * cos_th * cos_ph + gkvec_rlm_deriv_phi[lm] * sin_ph / sin_th ) / gk,
-                                    prefac * (-gkvec_rlm_deriv_theta[lm] * cos_th * sin_ph - gkvec_rlm_deriv_phi[lm] * cos_ph / sin_th ) / gk,
-                                    prefac * gkvec_rlm_deriv_theta[lm] * sin_th / gk
+                            vector3d<double_complex> rlm_grad (
+                                    prefac * (-gkvec_rlm_deriv_theta[lm] * cos_th * cos_ph + gkvec_rlm_deriv_phi[lm] * sin_ph / sin_th ) ,
+                                    prefac * (-gkvec_rlm_deriv_theta[lm] * cos_th * sin_ph - gkvec_rlm_deriv_phi[lm] * cos_ph / sin_th ) ,
+                                    prefac * gkvec_rlm_deriv_theta[lm] * sin_th
                                     );
 
                             for(int u = 0; u < nu_; u++){
                                 for(int v = 0; v < nv_; v++){
                                     beta_gk_t_(igkloc, atom_type.offset_lo() + xi, ind(u,v)) =
-                                            prefac_djldq * g_cart[u] * g_cart[v] + g_cart[u] * dRlm[v];
+                                            prefac_djldq * g_cart[u] * g_cart[v] + g_cart[u] * rlm_grad[v];
                                 }
                             }
                         }
                     }
                 }
 
-                if(igk != 0 && std::abs(vs[1]) < 10e-8){
+                if(igk != 0 && std::abs(vs[1]) < 10e-9){
                     for (int iat = 0; iat < unit_cell.num_atom_types(); iat++) {
                         auto& atom_type = unit_cell.atom_type(iat);
 
@@ -415,7 +415,7 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
                         for(int u = 0; u < nu_; u++){
                             for(int v = 0; v < nv_; v++){
                                 components_gk_a_[ind(u,v)](igk_loc, unit_cell.atom(ia).offset_lo() + xi) =
-                                        beta_gk_t_(igk_loc, unit_cell.atom(ia).type().offset_lo() + xi, ind(2,v)) * phase_gk[igk_loc] -
+                                        beta_gk_t_(igk_loc, unit_cell.atom(ia).type().offset_lo() + xi, ind(u,v)) * phase_gk[igk_loc] -
                                         double_complex(0.0,1.0) * vk_cart[u] * r_cart[v] *
                                         bp_->beta_gk()(igk_loc, unit_cell.atom(ia).offset_lo() + xi);
                             }
@@ -429,6 +429,16 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
 };
 
 }
+
+/*
+ -7.3990465889011578E-002    -2.1790155564801377E-004    -2.1789846493097258E-004
+  -2.1790155564801377E-004    -7.1145465678738001E-002     3.5815361135552318E-003
+  -2.1789846493097258E-004     3.5815361135552318E-003    -7.1145401164689953E-002
+
+  0.034873 0.000107064 0.000107064
+0.0001061 0.0328587 -0.00231897
+0.0001061 -0.00231897 0.0328587
+ */
 
 
 #endif /* __BETA_PROJECTORS_STRESS_H__ */

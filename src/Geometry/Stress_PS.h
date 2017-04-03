@@ -204,7 +204,7 @@ class Stress_PS
 
                 nlf.add_k_point_contribution(*kp, [&](int comp__, int ia__, double_complex val__)
                                              {
-                                                 stress_nl(comp__) -= 1/ctx_->unit_cell().omega() * val__.real();
+                                                 stress_nl(comp__) += 1/ctx_->unit_cell().omega() * val__.real();
                                                  //std::cout<< val__ <<std::endl;
                                              });
                 for(int i=0; i<3; i++){
