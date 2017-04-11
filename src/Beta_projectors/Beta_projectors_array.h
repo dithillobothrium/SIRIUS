@@ -34,7 +34,7 @@ class Beta_projectors_array
 
     public:
 
-        static const int num_ = N;
+        static const size_t num_ = N;
 
         Beta_projectors_array(Beta_projectors* bp)
         : bp_(bp)

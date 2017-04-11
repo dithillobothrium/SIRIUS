@@ -5,8 +5,8 @@
  *      Author: isivkov
  */
 
-#ifndef __GEOMETRY_STRESS_PS_H__
-#define __GEOMETRY_STRESS_PS_H__
+#ifndef __STRESS_PS_H__
+#define __STRESS_PS_H__
 
 #include "../simulation_context.h"
 #include "../periodic_function.h"
@@ -71,34 +71,22 @@ class Stress_PS
 
         }
 
-//        template<class ProcessFuncT>
-//        void process_in_g_space(ProcessFuncT func__)
-//        {
-//            Unit_cell &unit_cell = ctx_->unit_cell();
-//            Gvec const& gvecs = ctx_->gvec();
-//
-//            int gvec_count = gvecs.gvec_count(ctx_->comm().rank());
-//            int gvec_offset = gvecs.gvec_offset(ctx_->comm().rank());
-//
-//            double fact = gvecs.reduced() ? 2.0 : 1.0 ;
-//
-//            // here the calculations are in lattice vectors space
-//            #pragma omp parallel for
-//            for (int ia = 0; ia < unit_cell.num_atoms(); ia++){
-//                Atom &atom = unit_cell.atom(ia);
-//                int iat = atom.type_id();
-//
-//                // mpi distributed
-//                for (int igloc = 0; igloc < gvec_count; igloc++){
-//                    int ig = gvec_offset + igloc;
-//                    int igs = gvecs.shell(ig);
-//
-//                    func__(igs, igloc, ig, iat);
-//                }
-//            }
-//        }
 
+        inline void symmetrize(matrix3d<double>& mtrx__)
+        {
+            if (!ctx_->use_symmetry()) {
+                return;
+            }
 
+            matrix3d<double> result;
+
+            for (int i = 0; i < ctx_->unit_cell().symmetry().num_mag_sym(); i++) {
+                auto R = ctx_->unit_cell().symmetry().magnetic_group_symmetry(i).spg_op.rotation;
+                result = result + transpose(R) * mtrx__ * R;
+            }
+
+            mtrx__ = result * (1.0 / ctx_->unit_cell().symmetry().num_mag_sym());
+        }
 
         void calc_local_stress()
         {
@@ -187,36 +175,66 @@ class Stress_PS
 
         void calc_non_local_stress()
         {
-
+            mdarray<double, 2> collect_result(Beta_projectors_lattice_gradient::num_, ctx_->unit_cell().num_atoms() );
+            //collect_result.zero();
 
             auto& spl_num_kp = kset_->spl_num_kpoints();
 
-            std::cout<<"nl stress start"<<std::endl;
+            // create reduction operation for matrix3d
+            #pragma omp declare reduction (+: geometry3d::matrix3d<double>: omp_out+=omp_in )
+
+            geometry3d::matrix3d<double> sigma_non_loc_priv;
+
+            // iterate over k-points on the current MPI-rank
             for(int ikploc=0; ikploc < spl_num_kp.local_size() ; ikploc++){
+                collect_result.zero();
+                sigma_non_loc_priv.zero();
+
+                std::cout<<"------------ non-local stress kp ------------:"<<std::endl;
+
                 K_point* kp = kset_->k_point(spl_num_kp[ikploc]);
                 Beta_projectors_lattice_gradient bplg(&kp->beta_projectors(), ctx_);
                 Non_local_functor<double_complex, Beta_projectors_lattice_gradient::num_> nlf(ctx_,kset_,&bplg);
 
-                mdarray<double, 1> stress_nl(bplg.num_);
-                stress_nl.zero();
+                nlf.add_k_point_contribution(*kp,collect_result);
 
+                // iterate over atoms and collect result to tensor sigma_non_loc_priv
+                //#pragma omp parallel for reduction(+:sigma_non_loc_priv)
+                for(size_t ia=0; ia < collect_result.size(1); ia++){
+                    for(size_t comp=0; comp < collect_result.size(0); comp++){
+                        std::cout<< collect_result(comp, ia) * (1.0 / ctx_->unit_cell().omega())<<" ";
+                    }
+                    std::cout<<std::endl;
 
-
-                nlf.add_k_point_contribution(*kp, [&](int comp__, int ia__, double_complex val__)
-                                             {
-                                                 stress_nl(comp__) += 1/ctx_->unit_cell().omega() * val__.real();
-                                                 //std::cout<< val__ <<std::endl;
-                                             });
-                for(int i=0; i<3; i++){
-                    for(int j=0; j<3; j++){
-                        sigma_non_loc_(i,j) += stress_nl(bplg.ind(i,j));
-                        //sigma_non_loc_(j,i) = sigma_non_loc_(i,j);
+                    for(size_t i=0; i<3; i++){
+                        for(size_t j=0; j<3; j++){
+                            sigma_non_loc_priv(i,j) += collect_result(Beta_projectors_lattice_gradient::ind(i,j), ia) * (1.0 / ctx_->unit_cell().omega());
+                        }
                     }
                 }
+
+
+                for(int i=0; i<3; i++){
+                    for(int j=0; j<3; j++){
+                        std::cout<< sigma_non_loc_priv(i,j)<<" ";
+                    }
+                    std::cout<<std::endl;
+                }
+
+                sigma_non_loc_ +=  sigma_non_loc_priv ;
             }
 
 
 
+
+
+
+            // here one need to allreduce sigma_non_loc_priv or sigma_non_loc_
+            // if we calculate only upper(lower)-triangular values of sigma_non_loc_priv
+            // then need to make a loop for adding lower(upper)-triangulaer values to sigma_non_loc_
+
+
+            symmetrize(sigma_non_loc_);
 
             std::cout<<"non-local stress:"<<std::endl;
             for(int i=0; i<3; i++){

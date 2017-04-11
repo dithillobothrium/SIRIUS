@@ -251,10 +251,7 @@ class Forces_PS
 
             Non_local_functor<T,Beta_projectors_gradient::num_> nlf(ctx_,kset_,&bp_grad);
 
-            nlf.add_k_point_contribution(kpoint,[&](int comp__, int ia__, double_complex val__)
-                                         {
-                                             forces(comp__, ia__) += val__.real();
-                                         });
+            nlf.add_k_point_contribution(kpoint,forces);
         }
 
         void symmetrize_forces(mdarray<double,2>& unsym_forces, mdarray<double,2>& sym_forces );

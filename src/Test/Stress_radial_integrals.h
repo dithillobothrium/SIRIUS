@@ -122,49 +122,6 @@ class Stress_radial_integrals : public Radial_integrals_base
         }
 
 
-        /// return value of radial intefgral at point g__
-        /// key is a pair < idxrf - radial function index, l2 - quantum number>
-//        inline double beta_radial_integral(const lpair& key, double q__)
-//        {
-//            auto iqdq = iqdq_gkmax(q__);
-//            return atom_type_radial_integrals_[key](iqdq.first, iqdq.second);
-//        }
-//
-//        inline double beta_radial_integral(const Lpair_spline_map::iterator& it__, double q__)
-//        {
-//            auto iqdq = iqdq_gkmax(q__);
-//            return it__->second(iqdq.first, iqdq.second);
-//        }
-//
-//        /// return pairs < idxrf - radial function index, l2 - quantum number>
-//        inline const std::vector<lpair>& radial_integrals_lpairs()
-//        {
-//            return radial_integrals_lpairs_;
-//        }
-//
-//        inline std::vector<lpair> find_lpair_by_radial_index(int idxrf)
-//        {
-//            std::vector<lpair> lpairs;
-//            for(auto lpair: radial_integrals_lpairs_)
-//            {
-//                if(lpair.first == idxrf)
-//                {
-//                    lpairs.push_back(lpair);
-//                }
-//            }
-//            return lpairs;
-//        }
-//
-//        const Lpair_spline_map::iterator find_radial_integral(const lpair& key)
-//        {
-//            return atom_type_radial_integrals_.find(key);
-//        }
-//
-//        std::pair<Lpair_spline_map::iterator,Lpair_spline_map::iterator> radial_integral_iterators()
-//        {
-//            return std::make_pair(atom_type_radial_integrals_.begin(), atom_type_radial_integrals_.end());
-//        }
-
 
 };
 
