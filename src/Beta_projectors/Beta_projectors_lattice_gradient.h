@@ -41,8 +41,8 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
         : Beta_projectors_array<9>(bp__),
           ctx_(ctx__)
         {
-            init_beta_gk_t2();
-            init_beta_gk2();
+            init_beta_gk_t();
+            init_beta_gk();
         }
 
         static size_t ind(size_t i, size_t j)
@@ -324,7 +324,7 @@ class Beta_projectors_lattice_gradient: public Beta_projectors_array<9>
                             int idxrf = atom_type.indexb(xi).idxrf;
 
                             double_complex prefac_djldq = std::pow(double_complex(0, -1), l) * fourpi_omega *
-                                    ctx_->radial_integrals().beta_djldq_radial_integral(idxrf, iat, gk_length) /gk_length;
+                                    ctx_->radial_integrals().beta_djldq_radial_integral(idxrf, iat, gk_length) / gk_length;
 
                             double_complex prefac = std::pow(double_complex(0, -1), l) * fourpi_omega *
                                     ctx_->radial_integrals().beta_radial_integral(idxrf, iat, gk_length) / gk_length;
