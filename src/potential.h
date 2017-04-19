@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 Anton Kozhevnikov, Thomas Schulthess
+// Copyright (c) 2013-2017 Anton Kozhevnikov, Thomas Schulthess
 // All rights reserved.
 // 
 // Redistribution and use in source and binary forms, with or without modification, are permitted provided that 
@@ -131,13 +131,13 @@ class Potential
 
         void init_PAW();
 
-        double xc_mt_PAW_nonmagnetic(Radial_grid const& rgrid,
+        double xc_mt_PAW_nonmagnetic(Radial_grid<double> const& rgrid,
                                      mdarray<double, 3>& out_atom_pot,
                                      mdarray<double, 2> const& full_rho_lm,
                                      std::vector<double> const& rho_core);
 
 
-        double xc_mt_PAW_collinear(Radial_grid const& rgrid,
+        double xc_mt_PAW_collinear(Radial_grid<double> const& rgrid,
                                    mdarray<double,3> &out_atom_pot,
                                    mdarray<double,2> const& full_rho_lm,
                                    mdarray<double,3> const& magnetization_lm,
@@ -154,7 +154,7 @@ class Potential
 
         void calc_PAW_local_Dij(paw_potential_data_t &pdd, mdarray<double_complex, 4>& paw_dij);
 
-        double calc_PAW_hartree_potential(Atom& atom, const Radial_grid& grid,
+        double calc_PAW_hartree_potential(Atom& atom, const Radial_grid<double>& grid,
                                           mdarray<double, 2> const& full_density,
                                           mdarray<double, 3>& out_atom_pot);
 
@@ -165,76 +165,6 @@ class Potential
 
         void add_paw_Dij_to_atom_Dmtrx();
         
-        /// Solve Poisson equation for a single atom.
-        template <bool free_atom>
-        inline std::vector<double>
-        poisson_vmt(Atom const& atom__,
-                    Spheric_function<function_domain_t::spectral, double> const& rho_mt__,
-                    Spheric_function<function_domain_t::spectral, double>& vha_mt__) const
-        {
-            int lmmax_rho = rho_mt__.angular_domain_size();
-            int lmmax_pot = vha_mt__.angular_domain_size();
-            assert((int)l_by_lm_.size() >= lmmax_rho);
-            if (lmmax_rho > ctx_.lmmax_rho()) {
-                std::stringstream s;
-                s << "wrong angular size of rho_mt for atom of " << atom__.type().symbol() << std::endl
-                  << "  lmmax_rho: " << lmmax_rho << std::endl
-                  << "  ctx.lmmax_rho(): " << ctx_.lmmax_rho();
-                TERMINATE(s);
-            }
-            std::vector<double> qmt(ctx_.lmmax_rho(), 0);
-
-            double R = atom__.mt_radius();
-            int nmtp = atom__.num_mt_points();
-
-            #pragma omp parallel
-            {
-                std::vector<double> g1;
-                std::vector<double> g2;
-
-                #pragma omp for
-                for (int lm = 0; lm < lmmax_rho; lm++) {
-                    int l = l_by_lm_[lm];
-
-                    auto rholm = rho_mt__.component(lm);
-
-                    /* save multipole moment */
-                    qmt[lm] = rholm.integrate(g1, l + 2);
-                    
-                    if (lm < lmmax_pot) {
-
-                        rholm.integrate(g2, 1 - l);
-
-                        double d2 = fourpi / double(2 * l + 1); 
-                        double vlm;
-
-                        for (int ir = 0; ir < nmtp; ir++) {
-                            double r = atom__.radial_grid(ir);
-
-                            if (free_atom) {
-                                vlm = g1[ir] / std::pow(r, l + 1) + (g2.back() - g2[ir]) * std::pow(r, l);
-                            } else {
-                                double d1 = 1.0 / std::pow(R, 2 * l + 1); 
-                                vlm = (1.0 - std::pow(r / R, 2 * l + 1)) * g1[ir] / std::pow(r, l + 1) +
-                                      (g2.back() - g2[ir]) * std::pow(r, l) - (g1.back() - g1[ir]) * std::pow(r, l) * d1;
-                            }
-                            vha_mt__(lm, ir) = vlm * d2;
-                        }
-                    }
-                }
-            }
-            if (!free_atom) {
-                /* constant part of nuclear potential -z*(1/r - 1/R) */
-                for (int ir = 0; ir < nmtp; ir++) {
-                    vha_mt__(0, ir) += atom__.zn() / R / y00;
-                }
-            }
-            /* nuclear multipole moment */
-            qmt[0] -= atom__.zn() * y00;
-
-            return std::move(qmt);
-        }
-
         /// Compute MT part of the potential and MT multipole moments
         inline void poisson_vmt(Periodic_function<double>* rho__, 
                                 Periodic_function<double>* vh__,
@@ -326,34 +256,34 @@ class Potential
         inline void generate_local_potential()
         {
             PROFILE("sirius::Potential::generate_local_potential");
-
-            auto v = unit_cell_.make_periodic_function([this](int iat, double g)
-                                                       {
-                                                           return ctx_.radial_integrals().vloc_radial_integral(iat, g);
-                                                       },
-                                                       ctx_.gvec());
+            
+            Radial_integrals_vloc ri(ctx_.unit_cell(), ctx_.pw_cutoff(), 100);
+            auto v = ctx_.make_periodic_function<index_domain_t::global>([&ri](int iat, double g)
+                                                                         {
+                                                                             return ri.value(iat, g);
+                                                                         });
 
             ctx_.fft().transform<1>(ctx_.gvec().partition(), &v[ctx_.gvec().partition().gvec_offset_fft()]);
             ctx_.fft().output(&local_potential_->f_rg(0));
 
-            //if (ctx_.control().print_checksum_) {
-            //    auto cs = local_potential_->checksum_pw();
-            //    auto cs1 = local_potential_->checksum_rg();
-            //    if (ctx_.comm().rank() == 0) {
-            //        DUMP("checksum(local_potential_pw): %18.10f %18.10f", cs.real(), cs.imag());
-            //        DUMP("checksum(local_potential_rg): %18.10f", cs1);
-            //    }
-            //}
+            if (ctx_.control().print_checksum_) {
+                auto cs = local_potential_->checksum_pw();
+                auto cs1 = local_potential_->checksum_rg();
+                if (ctx_.comm().rank() == 0) {
+                    DUMP("checksum(local_potential_pw): %18.10f %18.10f", cs.real(), cs.imag());
+                    DUMP("checksum(local_potential_rg): %18.10f", cs1);
+                }
+            }
         }
         
-        inline void xc_mt_nonmagnetic(Radial_grid const& rgrid,
+        inline void xc_mt_nonmagnetic(Radial_grid<double> const& rgrid,
                                       std::vector<XC_functional>& xc_func,
                                       Spheric_function<spectral, double> const& rho_lm,
                                       Spheric_function<spatial, double>& rho_tp,
                                       Spheric_function<spatial, double>& vxc_tp, 
                                       Spheric_function<spatial, double>& exc_tp);
 
-        inline void xc_mt_magnetic(Radial_grid const& rgrid, 
+        inline void xc_mt_magnetic(Radial_grid<double> const& rgrid, 
                                    std::vector<XC_functional>& xc_func,
                                    Spheric_function<spectral, double>& rho_up_lm, 
                                    Spheric_function<spatial, double>& rho_up_tp, 
@@ -543,6 +473,100 @@ class Potential
             for (int j = 0; j < ctx_.num_mag_dims(); j++) {
                 effective_magnetic_field_[j]->zero();
             }
+        }
+
+        /// Solve Poisson equation for a single atom.
+        template <bool free_atom, typename T>
+        inline std::vector<T>
+        poisson_vmt(Atom const& atom__,
+                    Spheric_function<function_domain_t::spectral, T> const& rho_mt__,
+                    Spheric_function<function_domain_t::spectral, T>& vha_mt__) const
+        {
+            const bool use_r_prefact{false};
+
+            int lmmax_rho = rho_mt__.angular_domain_size();
+            int lmmax_pot = vha_mt__.angular_domain_size();
+            assert((int)l_by_lm_.size() >= lmmax_rho);
+            if (lmmax_rho > ctx_.lmmax_rho()) {
+                std::stringstream s;
+                s << "wrong angular size of rho_mt for atom of " << atom__.type().symbol() << std::endl
+                  << "  lmmax_rho: " << lmmax_rho << std::endl
+                  << "  ctx.lmmax_rho(): " << ctx_.lmmax_rho();
+                TERMINATE(s);
+            }
+            std::vector<T> qmt(ctx_.lmmax_rho(), 0);
+
+            double R = atom__.mt_radius();
+            int nmtp = atom__.num_mt_points();
+
+            #pragma omp parallel
+            {
+                std::vector<T> g1;
+                std::vector<T> g2;
+
+                #pragma omp for
+                for (int lm = 0; lm < lmmax_rho; lm++) {
+                    int l = l_by_lm_[lm];
+
+                    auto rholm = rho_mt__.component(lm);
+
+                    if (use_r_prefact) {
+                        /* save multipole moment */
+                        qmt[lm] = rholm.integrate(g1, l + 2);
+                    } else {
+                        for (int ir = 0; ir < nmtp; ir++) {
+                            double r = atom__.radial_grid(ir);
+                            rholm[ir] *= std::pow(r, l + 2);
+                        }
+                        qmt[lm] = rholm.interpolate().integrate(g1, 0);
+                    }
+                    
+                    if (lm < lmmax_pot) {
+
+                        if (use_r_prefact) {
+                            rholm.integrate(g2, 1 - l);
+                        } else {
+                            rholm = rho_mt__.component(lm);
+                            for (int ir = 0; ir < nmtp; ir++) {
+                                double r = atom__.radial_grid(ir);
+                                rholm[ir] *= std::pow(r, 1 - l);
+                            }
+                            rholm.interpolate().integrate(g2, 0);
+                        }
+
+                        double fact = fourpi / double(2 * l + 1); 
+                        T vlm;
+
+                        for (int ir = 0; ir < nmtp; ir++) {
+                            double r = atom__.radial_grid(ir);
+
+                            if (free_atom) {
+                                vlm = g1[ir] / std::pow(r, l + 1) + (g2.back() - g2[ir]) * std::pow(r, l);
+                            } else {
+                                double d1 = 1.0 / std::pow(R, 2 * l + 1); 
+                                vlm = (1.0 - std::pow(r / R, 2 * l + 1)) * g1[ir] / std::pow(r, l + 1) +
+                                      (g2.back() - g2[ir]) * std::pow(r, l) - (g1.back() - g1[ir]) * std::pow(r, l) * d1;
+                            }
+                            vha_mt__(lm, ir) = vlm * fact;
+                        }
+                    }
+                }
+            }
+            if (!free_atom) {
+                /* constant part of nuclear potential -z*(1/r - 1/R) */
+                for (int ir = 0; ir < nmtp; ir++) {
+                    #ifdef __VHA_AUX
+                    double r = atom__.radial_grid(ir);
+                    vha_mt__(0, ir) += atom__.zn() * (1 / R - 1 / r) / y00;
+                    #else
+                    vha_mt__(0, ir) += atom__.zn() / R / y00;
+                    #endif
+                }
+            }
+            /* nuclear multipole moment */
+            qmt[0] -= atom__.zn() * y00;
+
+            return std::move(qmt);
         }
 
         /// Poisson solver.
@@ -1041,7 +1065,7 @@ class Potential
 
         void mixer_init()
         {
-            mixer_ = Mixer_factory<double>(ctx_.mixer_input_section().type_, size(), ctx_.mixer_input_section(), comm_);
+            mixer_ = Mixer_factory<double>(ctx_.mixer_input().type_, size(), ctx_.mixer_input(), comm_);
             pack(*mixer_);
             mixer_->initialize();
         }

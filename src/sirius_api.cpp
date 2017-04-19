@@ -1001,44 +1001,31 @@ void sirius_load_kset(int32_t* kset_id)
 
 void FORTRAN(sirius_plot_potential)(void)
 {
-//    //FORTRAN(sirius_read_state)();
-//
-//    density->initial_density(1);
-//
-//    potential->generate_effective_potential(density->rho(), density->magnetization());
-//
-//
-//    // generate plane-wave coefficients of the potential in the interstitial region
-//    sim_ctx->fft().input(potential->effective_potential()->f_it());
-//    sim_ctx->fft().transform(-1);
-//    sim_ctx->fft().output(sim_ctx->num_gvec(), sim_ctx->fft_index(),
-//                                   potential->effective_potential()->f_pw());
-//
-//    int N = 10000;
-//    double* p = new double[N];
-//    double* x = new double[N];
-//
-//    double vf1[] = {0.1, 0.1, 0.1};
-//    double vf2[] = {0.9, 0.9, 0.9};
-//
-//    #pragma omp parallel for default(shared)
-//    for (int i = 0; i < N; i++)
-//    {
-//        double vf[3];
-//        double vc[3];
-//        double t = double(i) / (N - 1);
-//        for (int j = 0; j < 3; j++) vf[j] = vf1[j] + t * (vf2[j] - vf1[j]);
-//
-//        sim_ctx->get_coordinates<cartesian, direct>(vf, vc);
-//        p[i] = potential->value(vc);
-//        x[i] = Utils::vector_length(vc);
-//    }
-//
-//    FILE* fout = fopen("potential.dat", "w");
-//    for (int i = 0; i < N; i++) fprintf(fout, "%.12f %.12f\n", x[i] - x[0], p[i]);
-//    fclose(fout);
-//    delete x;
-//    delete p;
+    int N{10000};
+
+    potential->effective_potential()->fft_transform(-1);
+
+    std::vector<double> p(N);
+    std::vector<double> x(N);
+
+    vector3d<double> vf1({0.1, 0.1, 0.1});
+    vector3d<double> vf2({0.4, 0.4, 0.4});
+
+    #pragma omp parallel for default(shared)
+    for (int i = 0; i < N; i++) {
+        double t = double(i) / (N - 1);
+        auto vf = vf1 + (vf2 - vf1) * t;
+
+        auto vc = sim_ctx->unit_cell().get_cartesian_coordinates(vf);
+        p[i] = potential->effective_potential()->value(vc);
+        x[i] = vc.length();
+    }
+
+    FILE* fout = fopen("potential.dat", "w");
+    for (int i = 0; i < N; i++) {
+        fprintf(fout, "%.12f %.12f\n", x[i] - x[0], p[i]);
+    }
+    fclose(fout);
 }
 
 void sirius_write_json_output(void)
@@ -1541,6 +1528,43 @@ void sirius_generate_xc_potential(ftn_double* vxcmt__,
     }
 }
 
+void sirius_generate_rho_multipole_moments(ftn_int*            lmmax__,
+                                           ftn_double_complex* qmt__)
+{
+    mdarray<ftn_double_complex, 2> qmt(qmt__, *lmmax__, sim_ctx->unit_cell().num_atoms());
+    qmt.zero();
+    
+    int lmmax = std::min(*lmmax__, sim_ctx->lmmax_rho());
+
+    auto l_by_lm = Utils::l_by_lm(Utils::lmax_by_lmmax(lmmax));
+
+    for (int ialoc = 0; ialoc < sim_ctx->unit_cell().spl_num_atoms().local_size(); ialoc++) {
+        int ia = sim_ctx->unit_cell().spl_num_atoms(ialoc);
+        std::vector<double> tmp(lmmax);
+        for (int lm = 0; lm < lmmax; lm++) {
+            int l = l_by_lm[lm];
+            auto s = density->rho()->f_mt(ialoc).component(lm);
+            tmp[lm] = s.integrate(l + 2);
+        }
+        sirius::SHT::convert(Utils::lmax_by_lmmax(lmmax), tmp.data(), &qmt(0, ia));
+        qmt(0, ia) -= sim_ctx->unit_cell().atom(ia).zn() * y00;
+    }
+    sim_ctx->comm().allreduce(&qmt(0, 0), static_cast<int>(qmt.size()));
+}
+
+void sirius_generate_coulomb_potential_mt(ftn_int*            ia__,
+                                          ftn_int*            lmmax_rho__,
+                                          ftn_double_complex* rho__,
+                                          ftn_int*            lmmax_pot__,
+                                          ftn_double_complex* vmt__)
+{
+    auto& atom = sim_ctx->unit_cell().atom(*ia__ - 1);
+
+    sirius::Spheric_function<function_domain_t::spectral, double_complex> rho(rho__, *lmmax_rho__, atom.radial_grid());
+    sirius::Spheric_function<function_domain_t::spectral, double_complex> vmt(vmt__, *lmmax_pot__, atom.radial_grid());
+    potential->poisson_vmt<true>(atom, rho, vmt);
+}
+
 void sirius_generate_coulomb_potential(ftn_double* vclmt__,
                                        ftn_double* vclit__)
 {
@@ -1578,7 +1602,7 @@ void sirius_radial_solver(ftn_char    type__,
 
     relativity_t rel = relativity_t::none;
 
-    sirius::Radial_grid rgrid(*nr__, r__);
+    sirius::Radial_grid_ext<double> rgrid(*nr__, r__);
     std::vector<double> v(v__, v__ + rgrid.num_points());
     sirius::Radial_solver solver(*zn__, v, rgrid);
 
@@ -2208,7 +2232,7 @@ void sirius_get_gvec_index(int32_t* gvec__, int32_t* ig__)
 
 void sirius_use_internal_mixer(int32_t* use_internal_mixer__)
 {
-    *use_internal_mixer__ = (sim_ctx->mixer_input_section().exist_) ? 1 : 0;
+    *use_internal_mixer__ = (sim_ctx->mixer_input().exist_) ? 1 : 0;
 }
 
 void sirius_set_iterative_solver_tolerance(double* tol__)
@@ -2786,7 +2810,7 @@ void sirius_fderiv(ftn_int* m__,
                    ftn_double* g__)
 {
     int np = *np__;
-    sirius::Radial_grid rgrid(np, x__);
+    sirius::Radial_grid_ext<double> rgrid(np, x__);
     sirius::Spline<double> s(rgrid);
     for (int i = 0; i < np; i++) {
         s[i] = f__[i];
@@ -2814,7 +2838,7 @@ void sirius_integrate_(ftn_int* m__,
                       ftn_double* result__)
 {
     int np = *np__;
-    sirius::Radial_grid rgrid(np, x__);
+    sirius::Radial_grid_ext<double> rgrid(np, x__);
     sirius::Spline<double> s(rgrid);
     for (int i = 0; i < np; i++) {
         s[i] = f__[i];
@@ -2866,53 +2890,55 @@ void sirius_get_beta_projectors(ftn_int* kset_id__,
 {
     PROFILE("sirius_api::sirius_get_beta_projectors");
 
-    if (*nkb__ != sim_ctx->unit_cell().mt_lo_basis_size()) {
-        TERMINATE("wrong number of beta-projectors");
-    }
+    STOP();
 
-    auto kset = kset_list[*kset_id__];
-    auto kp = (*kset)[*ik__ - 1];
-    auto& beta_gk = kp->beta_projectors().beta_gk();
+    //if (*nkb__ != sim_ctx->unit_cell().mt_lo_basis_size()) {
+    //    TERMINATE("wrong number of beta-projectors");
+    //}
 
-    mdarray<int, 2> gvec_k(gvec_k__, 3, *npw__);
-    mdarray<double_complex, 2> vkb(vkb__, *ld__, *nkb__);
-    vkb.zero();
-    
-    std::vector<double_complex> wf_tmp(kp->num_gkvec());
-    int gkvec_count = kp->gkvec().gvec_count(kp->comm().rank());
-    int gkvec_offset = kp->gkvec().gvec_offset(kp->comm().rank());
+    //auto kset = kset_list[*kset_id__];
+    //auto kp = (*kset)[*ik__ - 1];
+    //auto& beta_gk = kp->beta_projectors().beta_gk_total();
 
-    for (int ia = 0; ia < sim_ctx->unit_cell().num_atoms(); ia++) {
-        auto& atom = sim_ctx->unit_cell().atom(ia);
-        
-        int nbf = atom.mt_basis_size();
+    //mdarray<int, 2> gvec_k(gvec_k__, 3, *npw__);
+    //mdarray<double_complex, 2> vkb(vkb__, *ld__, *nkb__);
+    //vkb.zero();
+    //
+    //std::vector<double_complex> wf_tmp(kp->num_gkvec());
+    //int gkvec_count = kp->gkvec().gvec_count(kp->comm().rank());
+    //int gkvec_offset = kp->gkvec().gvec_offset(kp->comm().rank());
 
-        /* index of Rlm of QE */
-        auto idx_Rlm = [](int lm)
-        {
-            int l = static_cast<int>(std::sqrt(static_cast<double>(lm) + 1e-12));
-            int m = lm - l * l - l;
-            return (m > 0) ? 2 * m - 1 : -2 * m;
-        };
+    //for (int ia = 0; ia < sim_ctx->unit_cell().num_atoms(); ia++) {
+    //    auto& atom = sim_ctx->unit_cell().atom(ia);
+    //    
+    //    int nbf = atom.mt_basis_size();
 
-        for (int xi = 0; xi < nbf; xi++) {
-            int lm     = atom.type().indexb(xi).lm;
-            int idxrf  = atom.type().indexb(xi).idxrf;
-            /* position in QE array */
-            int xi1 = atom.type().indexb().index_by_idxrf(idxrf) + idx_Rlm(lm);
+    //    /* index of Rlm of QE */
+    //    auto idx_Rlm = [](int lm)
+    //    {
+    //        int l = static_cast<int>(std::sqrt(static_cast<double>(lm) + 1e-12));
+    //        int m = lm - l * l - l;
+    //        return (m > 0) ? 2 * m - 1 : -2 * m;
+    //    };
 
-            std::memcpy(&wf_tmp[gkvec_offset], &beta_gk(0, atom.offset_lo() + xi), gkvec_count * sizeof(double_complex));
-            kp->comm().allgather(wf_tmp.data(), gkvec_offset, gkvec_count);
+    //    for (int xi = 0; xi < nbf; xi++) {
+    //        int lm     = atom.type().indexb(xi).lm;
+    //        int idxrf  = atom.type().indexb(xi).idxrf;
+    //        /* position in QE array */
+    //        int xi1 = atom.type().indexb().index_by_idxrf(idxrf) + idx_Rlm(lm);
 
-            for (int ig = 0; ig < *npw__; ig++) {
-                int ig1 = kp->gkvec().index_by_gvec({gvec_k(0, ig), gvec_k(1, ig), gvec_k(2, ig)});
-                if (ig1 < 0 || ig1 >= kp->num_gkvec()) {
-                    TERMINATE("G-vector is out of range");
-                }
-                vkb(ig, atom.offset_lo() + xi1) = wf_tmp[ig1];
-            }
-        }
-    }
+    //        std::memcpy(&wf_tmp[gkvec_offset], &beta_gk(0, atom.offset_lo() + xi), gkvec_count * sizeof(double_complex));
+    //        kp->comm().allgather(wf_tmp.data(), gkvec_offset, gkvec_count);
+
+    //        for (int ig = 0; ig < *npw__; ig++) {
+    //            int ig1 = kp->gkvec().index_by_gvec({gvec_k(0, ig), gvec_k(1, ig), gvec_k(2, ig)});
+    //            if (ig1 < 0 || ig1 >= kp->num_gkvec()) {
+    //                TERMINATE("G-vector is out of range");
+    //            }
+    //            vkb(ig, atom.offset_lo() + xi1) = wf_tmp[ig1];
+    //        }
+    //    }
+    //}
 }
 
 void sirius_get_beta_projectors_by_kp(ftn_int* kset_id__,

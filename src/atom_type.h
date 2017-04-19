@@ -61,7 +61,7 @@ class radial_functions_index
         int lmax_lo_;
 
         int lmax_;
-    
+
     public:
 
         void init(const std::vector<local_orbital_descriptor>& lo_descriptors__)
@@ -85,7 +85,7 @@ class radial_functions_index
 
             num_rf_ = std::vector<int>(lmax_ + 1, 0);
             num_lo_ = std::vector<int>(lmax_ + 1, 0);
-            
+
             max_num_rf_ = 0;
 
             radial_function_index_descriptors_.clear();
@@ -162,7 +162,7 @@ class radial_functions_index
             assert(l >= 0 && l < (int)num_lo_.size());
             return num_lo_[l];
         }
-        
+
         /// Maximum possible number of radial functions for an orbital quantum number.
         inline int max_num_rf() const
         {
@@ -173,7 +173,7 @@ class radial_functions_index
         {
             return lmax_;
         }
-        
+
         inline int lmax_lo() const
         {
             return lmax_lo_;
@@ -185,14 +185,14 @@ class basis_functions_index
     private:
 
         std::vector<basis_function_index_descriptor> basis_function_index_descriptors_; 
-       
+
         mdarray<int, 2> index_by_lm_order_;
 
         mdarray<int, 1> index_by_idxrf_;
-       
+
         /// number of augmented wave basis functions
         int size_aw_;
-       
+
         /// number of local orbital basis functions
         int size_lo_;
 
@@ -201,7 +201,7 @@ class basis_functions_index
         basis_functions_index() : size_aw_(0), size_lo_(0)
         {
         }
-        
+
         void init(radial_functions_index& indexr)
         {
             basis_function_index_descriptors_.clear();
@@ -227,7 +227,7 @@ class basis_functions_index
                 int lm = basis_function_index_descriptors_[i].lm;
                 int order = basis_function_index_descriptors_[i].order;
                 index_by_lm_order_(lm, order) = i;
-                
+
                 // get number of aw basis functions
                 if (basis_function_index_descriptors_[i].idxlo < 0) size_aw_ = i + 1;
             }
@@ -253,12 +253,12 @@ class basis_functions_index
         {
             return size_lo_;
         }
-        
+
         inline int index_by_l_m_order(int l, int m, int order) const
         {
             return index_by_lm_order_(Utils::lm_by_l_m(l, m), order);
         }
-        
+
         inline int index_by_lm_order(int lm, int order) const
         {
             return index_by_lm_order_(lm, order);
@@ -268,7 +268,7 @@ class basis_functions_index
         {
             return index_by_idxrf_(idxrf);
         }
-        
+
         inline basis_function_index_descriptor const& operator[](int i) const
         {
             assert(i >= 0 && i < (int)basis_function_index_descriptors_.size());
@@ -287,13 +287,13 @@ class Atom_type
 
         /// Unique string label for the atom type.
         std::string label_;
-    
+
         /// Chemical element symbol.
         std::string symbol_;
 
         /// Chemical element name.
         std::string name_;
-        
+
         /// Nucleus charge, treated as positive(!) integer.
         int zn_{0};
 
@@ -305,10 +305,10 @@ class Atom_type
 
         /// Number of muffin-tin points.
         int num_mt_points_{0};
-        
+
         /// Beginning of the radial grid.
         double radial_grid_origin_{0};
-        
+
         /// List of atomic levels.
         std::vector<atomic_level_descriptor> atomic_levels_;
 
@@ -317,19 +317,19 @@ class Atom_type
 
         /// Number of valence electrons.
         double num_valence_electrons_{0};
-        
+
         /// Default augmented wave configuration.
         radial_solution_descriptor_set aw_default_l_;
-        
+
         /// augmented wave configuration for specific l
         std::vector<radial_solution_descriptor_set> aw_specific_l_;
 
         /// list of radial descriptor sets used to construct augmented waves 
         std::vector<radial_solution_descriptor_set> aw_descriptors_;
-        
+
         /// list of radial descriptor sets used to construct local orbitals
         std::vector<local_orbital_descriptor> lo_descriptors_;
-        
+
         /// Maximum number of AW radial functions across angular momentums.
         int max_aw_order_{0};
 
@@ -402,7 +402,7 @@ class Atom_type
     protected:
 
         /// Radial grid.
-        Radial_grid radial_grid_;
+        Radial_grid<double> radial_grid_;
 
         /// Density of a free atom.
         Spline<double> free_atom_density_spline_;
@@ -410,7 +410,7 @@ class Atom_type
         std::vector<double> free_atom_density_;
 
         /// Radial grid of a free atom.
-        Radial_grid free_atom_radial_grid_;
+        Radial_grid<double> free_atom_radial_grid_;
 
     public:
         
@@ -430,7 +430,7 @@ class Atom_type
             , num_mt_points_(2000 + zn__ * 50)
             , atomic_levels_(levels__)
         {
-            radial_grid_ = Radial_grid(grid_type__, num_mt_points_, 1e-6 / zn_, 20.0 + 0.25 * zn_); 
+            radial_grid_ = Radial_grid_factory<double>(grid_type__, num_mt_points_, 1e-6 / zn_, 20.0 + 0.25 * zn_);
         }
  
         Atom_type(Simulation_parameters const& parameters__,
@@ -455,10 +455,10 @@ class Atom_type
             }
             if (num_points__ < 0 && points__ == nullptr) {
                 /* create default exponential grid */
-                radial_grid_ = Radial_grid(lin_exp_grid, num_mt_points_, radial_grid_origin_, mt_radius_); 
+                radial_grid_ = Radial_grid_exp<double>(num_mt_points_, radial_grid_origin_, mt_radius_); 
             } else {
                 assert(num_points__ == num_mt_points_);
-                radial_grid_ = Radial_grid(num_points__, points__);
+                radial_grid_ = Radial_grid_ext<double>(num_points__, points__);
             }
             if (parameters_.processing_unit() == GPU) {
                 #ifdef __GPU
@@ -581,14 +581,14 @@ class Atom_type
             return num_mt_points_;
         }
 
-        inline Radial_grid const& radial_grid() const
+        inline Radial_grid<double> const& radial_grid() const
         {
             assert(num_mt_points_ > 0);
             assert(radial_grid_.num_points() > 0);
             return radial_grid_;
         }
 
-        inline Radial_grid const& free_atom_radial_grid() const
+        inline Radial_grid<double> const& free_atom_radial_grid() const
         {
             return free_atom_radial_grid_;
         }
@@ -854,8 +854,10 @@ class Atom_type
 
         inline void set_free_atom_radial_grid(int num_points__, double const* points__)
         {
-            if (num_points__ <= 0) TERMINATE("wrong number of radial points");
-            free_atom_radial_grid_ = Radial_grid(num_points__, points__);
+            if (num_points__ <= 0) {
+                TERMINATE("wrong number of radial points");
+            }
+            free_atom_radial_grid_ = Radial_grid_ext<double>(num_points__, points__);
         }
 
         inline void set_free_atom_density(int num_points__, double const* dens__)
@@ -1093,7 +1095,7 @@ inline void Atom_type::print_info() const
     printf("mt_radius      : %f\n", mt_radius_);
     printf("num_mt_points  : %i\n", num_mt_points_);
     printf("grid_origin    : %f\n", radial_grid_[0]);
-    printf("grid_name      : %s\n", radial_grid_.grid_type_name().c_str());
+    printf("grid_name      : %s\n", radial_grid_.name().c_str());
     printf("\n");
     printf("number of core electrons    : %f\n", num_core_electrons_);
     printf("number of valence electrons : %f\n", num_valence_electrons_);
@@ -1481,7 +1483,7 @@ inline void Atom_type::read_input(const std::string& fname)
 
         /* create free atom radial grid */
         auto fa_r = parser["free_atom"]["radial_grid"].get<std::vector<double>>();
-        free_atom_radial_grid_ = Radial_grid(fa_r);
+        free_atom_radial_grid_ = Radial_grid_ext<double>(static_cast<int>(fa_r.size()), fa_r.data());
         /* read density */
         free_atom_density_ = parser["free_atom"]["density"].get<std::vector<double>>();
     }

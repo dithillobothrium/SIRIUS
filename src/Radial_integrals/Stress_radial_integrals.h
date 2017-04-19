@@ -15,7 +15,7 @@
 
 #include "../sbessel.h"
 
-#include "Radial_integrals_base.h"
+#include "radial_integrals.h"
 
 namespace sirius {
 
@@ -29,7 +29,7 @@ struct l2_rad_int_t
 /// generates and stores splines in G-space of beta radial integrals according to
 /// l-selection rules for Gaunt coefficients { {l(idxrf), 1, l2} , {m1, m, m2}}
 /// idxrf - radial function index, l2 - quantum number of J Bessel function
-class Stress_radial_integrals : public Radial_integrals_base
+class Stress_radial_integrals : public Radial_integrals_grid
 {
     private:
         std::vector<std::vector<l2_rad_int_t>> atom_type_radial_integrals_;
@@ -105,24 +105,15 @@ class Stress_radial_integrals : public Radial_integrals_base
         }
 
 
-        inline double beta_radial_integral(int idxrf__, int l2idx__, double q__) const
+        inline double value(int idxrf__, int l2idx__, double q__) const
         {
-            return integral_at(atom_type_radial_integrals_[idxrf__][l2idx__].rad_int, q__);
-        }
-
-        inline double beta_radial_integral(const Spline<double>& rad_int__, double q__) const
-        {
-            auto iqdq = iqdq_gkmax(q__);
-            return rad_int__(iqdq.first, iqdq.second);
+            return value_at(atom_type_radial_integrals_[idxrf__][l2idx__].rad_int, q__);
         }
 
         inline const std::vector<std::vector<l2_rad_int_t>>& beta_l2_integrals() const
         {
             return atom_type_radial_integrals_;
         }
-
-
-
 };
 
 }

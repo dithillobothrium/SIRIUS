@@ -63,7 +63,7 @@ class Periodic_function: public Smooth_periodic_function<T>
         /// Complex counterpart for a given type T.
         typedef typename type_wrapper<T>::complex_t complex_t; 
 
-        Simulation_parameters const& parameters_;
+        Simulation_context const& ctx_;
         
         Unit_cell const& unit_cell_;
 
@@ -105,7 +105,7 @@ class Periodic_function: public Smooth_periodic_function<T>
                           int angular_domain_size__,
                           int allocate_pw__)
             : Smooth_periodic_function<T>(ctx__.fft(), ctx__.gvec())
-            , parameters_(ctx__)
+            , ctx_(ctx__)
             , unit_cell_(ctx__.unit_cell())
             , step_function_(ctx__.step_function())
             , comm_(ctx__.comm())
@@ -116,7 +116,7 @@ class Periodic_function: public Smooth_periodic_function<T>
                 allocate_pw();
             }
 
-            if (parameters_.full_potential()) {
+            if (ctx_.full_potential()) {
                 f_mt_local_ = mdarray<Spheric_function<spectral, T>, 1>(unit_cell_.spl_num_atoms().local_size());
             }
         }
@@ -134,18 +134,18 @@ class Periodic_function: public Smooth_periodic_function<T>
                 return;
             }
 
-            f_pw_ = mdarray<double_complex, 1>(gvec_.num_gvec());
+            f_pw_ = mdarray<double_complex, 1>(gvec_.num_gvec(), memory_t::host, "f_pw_");
             this->f_pw_local_ = mdarray<double_complex, 1>(&f_pw_[this->gvec().partition().gvec_offset_fft()],
-                                                           this->fft_->local_size());
+                                                           this->fft_->local_size(), "f_pw_local_");
             is_f_pw_allocated_ = true;
         }
 
         /// Allocate memory for muffin-tin part.
         void allocate_mt(bool allocate_global__)
         {
-            if (parameters_.full_potential()) {
+            if (ctx_.full_potential()) {
                 if (allocate_global__) {
-                    f_mt_ = mdarray<T, 3>(angular_domain_size_, unit_cell_.max_num_mt_points(), unit_cell_.num_atoms());
+                    f_mt_ = mdarray<T, 3>(angular_domain_size_, unit_cell_.max_num_mt_points(), unit_cell_.num_atoms(), memory_t::host, "f_mt_");
                     set_local_mt_ptr();
                 } else {
                     for (int ialoc = 0; ialoc < unit_cell_.spl_num_atoms().local_size(); ialoc++) {
@@ -174,7 +174,7 @@ class Periodic_function: public Smooth_periodic_function<T>
             f_mt_.zero();
             this->f_rg_.zero();
             f_pw_.zero();
-            if (parameters_.full_potential()) {
+            if (ctx_.full_potential()) {
                 for (int ialoc = 0; ialoc < unit_cell_.spl_num_atoms().local_size(); ialoc++) {
                     f_mt_local_(ialoc).zero();
                 }
@@ -185,7 +185,7 @@ class Periodic_function: public Smooth_periodic_function<T>
         {
             std::memcpy(f_it__, this->f_rg_.template at<CPU>(), this->fft_->local_size() * sizeof(T));
 
-            if (parameters_.full_potential()) {
+            if (ctx_.full_potential()) {
                 mdarray<T, 3> f_mt(f_mt__, angular_domain_size_, unit_cell_.max_num_mt_points(), unit_cell_.num_atoms());
                 for (int ialoc = 0; ialoc < unit_cell_.spl_num_atoms().local_size(); ialoc++) {
                     int ia = unit_cell_.spl_num_atoms(ialoc);
@@ -208,7 +208,7 @@ class Periodic_function: public Smooth_periodic_function<T>
                 this->f_rg_(irloc) += g->f_rg(irloc);
             }
             
-            if (parameters_.full_potential()) {
+            if (ctx_.full_potential()) {
                 for (int ialoc = 0; ialoc < unit_cell_.spl_num_atoms().local_size(); ialoc++)
                     f_mt_local_(ialoc) += g->f_mt(ialoc);
             }
@@ -220,7 +220,7 @@ class Periodic_function: public Smooth_periodic_function<T>
 
             it_val = 0;
             
-            if (!parameters_.full_potential()) {
+            if (!ctx_.full_potential()) {
                 #pragma omp parallel
                 {
                     T it_val_t = 0;
@@ -242,7 +242,7 @@ class Periodic_function: public Smooth_periodic_function<T>
             this->fft_->comm().allreduce(&it_val, 1);
             T total = it_val;
             
-            if (parameters_.full_potential()) {
+            if (ctx_.full_potential()) {
                 mt_val = std::vector<T>(unit_cell_.num_atoms(), 0);
 
                 for (int ialoc = 0; ialoc < unit_cell_.spl_num_atoms().local_size(); ialoc++) {
@@ -278,7 +278,7 @@ class Periodic_function: public Smooth_periodic_function<T>
         /** \todo write and read distributed functions */
         void hdf5_write(HDF5_tree h5f)
         {
-            if (parameters_.full_potential()) {
+            if (ctx_.full_potential()) {
                 h5f.write("f_mt", f_mt_);
             }
             h5f.write("f_pw", f_pw_);
@@ -287,7 +287,7 @@ class Periodic_function: public Smooth_periodic_function<T>
 
         void hdf5_read(HDF5_tree h5f)
         {
-            if (parameters_.full_potential()) {
+            if (ctx_.full_potential()) {
                 h5f.read("f_mt", f_mt_);
             }
             h5f.read("f_pw", f_pw_);
@@ -298,7 +298,7 @@ class Periodic_function: public Smooth_periodic_function<T>
         {
             //size_t size = this->fft_->local_size();
             size_t size = gvec_.num_gvec() * 2;
-            if (parameters_.full_potential()) {
+            if (ctx_.full_potential()) {
                 for (int ic = 0; ic < unit_cell_.num_atom_symmetry_classes(); ic++) {
                     size += angular_domain_size_ * unit_cell_.atom_symmetry_class(ic).atom_type().num_mt_points() * 
                             unit_cell_.atom_symmetry_class(ic).num_atoms();
@@ -313,7 +313,7 @@ class Periodic_function: public Smooth_periodic_function<T>
 
             size_t n = 0;
             
-            if (parameters_.full_potential()) {
+            if (ctx_.full_potential()) {
                 for (int ia = 0; ia < unit_cell_.num_atoms(); ia++) {
                     for (int i1 = 0; i1 < unit_cell_.atom(ia).num_mt_points(); i1++) {
                         for (int i0 = 0; i0 < angular_domain_size_; i0++) {
@@ -342,7 +342,7 @@ class Periodic_function: public Smooth_periodic_function<T>
 
             size_t n = 0;
 
-            if (parameters_.full_potential()) {
+            if (ctx_.full_potential()) {
                 for (int ia = 0; ia < unit_cell_.num_atoms(); ia++) {
                     for (int i1 = 0; i1 < unit_cell_.atom(ia).num_mt_points(); i1++) {
                         for (int i0 = 0; i0 < angular_domain_size_; i0++) {
@@ -367,7 +367,7 @@ class Periodic_function: public Smooth_periodic_function<T>
         /// Set the global pointer to the muffin-tin part
         void set_mt_ptr(T* mt_ptr__)
         {
-            f_mt_ = mdarray<T, 3>(mt_ptr__, angular_domain_size_, unit_cell_.max_num_mt_points(), unit_cell_.num_atoms());
+            f_mt_ = mdarray<T, 3>(mt_ptr__, angular_domain_size_, unit_cell_.max_num_mt_points(), unit_cell_.num_atoms(), "f_mt_");
             set_local_mt_ptr();
         }
 
@@ -399,14 +399,14 @@ class Periodic_function: public Smooth_periodic_function<T>
 
         double value(vector3d<double>& vc)
         {
-            int ja, jr;
-            double dr, tp[2];
+            int ja{-1}, jr{-1};
+            double dr{0}, tp[2];
         
             if (unit_cell_.is_point_in_mt(vc, ja, jr, dr, tp)) {
                 int lmax = Utils::lmax_by_lmmax(angular_domain_size_);
                 std::vector<double> rlm(angular_domain_size_);
                 SHT::spherical_harmonics(lmax, tp[0], tp[1], &rlm[0]);
-                double p = 0.0;
+                double p{0};
                 for (int lm = 0; lm < angular_domain_size_; lm++) {
                     double d = (f_mt_(lm, jr + 1, ja) - f_mt_(lm, jr, ja)) / unit_cell_.atom(ja).type().radial_grid().dx(jr);
         
@@ -414,7 +414,7 @@ class Periodic_function: public Smooth_periodic_function<T>
                 }
                 return p;
             } else {
-                double p = 0.0;
+                double p{0};
                 for (int ig = 0; ig < gvec_.num_gvec(); ig++) {
                     vector3d<double> vgc = gvec_.gvec_cart(ig);
                     p += std::real(f_pw_(ig) * std::exp(double_complex(0.0, vc * vgc)));
@@ -472,7 +472,7 @@ class Periodic_function: public Smooth_periodic_function<T>
             
             T result_rg{0};
             
-            if (!parameters_.full_potential()) {
+            if (!ctx_.full_potential()) {
                 #pragma omp parallel
                 {
                     T rt{0};
@@ -496,7 +496,7 @@ class Periodic_function: public Smooth_periodic_function<T>
             this->fft_->comm().allreduce(&result_rg, 1);
 
             T result_mt{0};
-            if (parameters_.full_potential()) {
+            if (ctx_.full_potential()) {
                 for (int ialoc = 0; ialoc < unit_cell_.spl_num_atoms().local_size(); ialoc++) {
                     auto r = sirius::inner(f_mt(ialoc), g__->f_mt(ialoc));
                     result_mt += r;

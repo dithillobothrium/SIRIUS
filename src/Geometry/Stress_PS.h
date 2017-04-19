@@ -8,24 +8,24 @@
 #ifndef __STRESS_PS_H__
 #define __STRESS_PS_H__
 
+#include <fstream>
+
 #include "../simulation_context.h"
 #include "../periodic_function.h"
 #include "../augmentation_operator.h"
 #include "../Beta_projectors/beta_projectors.h"
 #include "../Beta_projectors/beta_projectors_gradient.h"
-#include "../Beta_projectors/Beta_projectors_lattice_gradient.h"
 #include "../potential.h"
 #include "../density.h"
 
-#include "../Test/Stress_radial_integrals.h"
-#include "../Test/Vloc_radial_integrals.h"
+//#include "../Test/Stress_radial_integrals.h"
+//#include "../Test/Vloc_radial_integrals.h"
 
+#include "../Radial_integrals/radial_integrals.h"
 #include "../SDDK/geometry3d.hpp"
+#include "../Beta_projectors/Beta_projectors_strain_deriv_gaunt.h"
 
 #include "Non_local_functor.h"
-
-#include <fstream>
-
 namespace sirius
 {
 
@@ -88,94 +88,91 @@ class Stress_PS
             mtrx__ = result * (1.0 / ctx_->unit_cell().symmetry().num_mag_sym());
         }
 
-        void calc_local_stress()
-        {
-            // density for convolution with potentials
-            const Periodic_function<double>* valence_rho = density_->rho();
-
-            //------------------------------------------
-            // calc dV/dG contributions to stress tensor
-            //------------------------------------------
-
-            // generate gradient radial vloc integrals
-            Vloc_radial_integrals vlri(ctx_, &ctx_->unit_cell());
-            vlri.generate_g_gradient_radial_integrals();
-
-            // d vloc(G) / d G
-            splindex<block> spl_ngv(ctx_->gvec().num_gvec(), ctx_->comm().size(), ctx_->comm().rank());
-
-            mdarray<double_complex, 1> dvloc_dg_local(spl_ngv.local_size());
-            dvloc_dg_local.zero();
-            ctx_->unit_cell().make_periodic_function_local(dvloc_dg_local, spl_ngv, vlri.g_gradient_vloc_radial_integrals(), ctx_->gvec());
-
-            // prepare for reduction
-            sigma_loc_.zero();
-            geometry3d::matrix3d<double>& sigma_loc = sigma_loc_;
-
-            // reduction of matrix3d type
-            #pragma omp declare reduction( + : geometry3d::matrix3d<double> : omp_out += omp_in) \
-                                           initializer( omp_priv = geometry3d::matrix3d<double>() )
-
-            #pragma omp parallel for reduction( + : sigma_loc )
-            for(int igloc = 0; igloc < spl_ngv.local_size(); igloc++){
-                int ig = spl_ngv.global_offset() + igloc;
-
-                if( ig==0 ){
-                    continue;
-                }
-
-                auto gvec_cart = ctx_->gvec().gvec_cart(ig);
-                auto gvec_norm = gvec_cart.length();
-
-                double scalar_part = ( dvloc_dg_local(igloc) *  std::conj(valence_rho->f_pw_local(ig))  ).real() / gvec_norm;
-
-                for(int i=0; i<3; i++){
-                    for(int j=0; j<=i; j++){
-                        sigma_loc(i,j) += gvec_cart[i] * gvec_cart[j] * scalar_part;
-                    }
-                }
-            }
-
-
-            // if G-vectors are reduced
-            double fact = ctx_->gvec().reduced() ? 2.0 : 1.0 ;
-
-            // multiply by scalars
-            for(int i=0; i<3; i++){
-                for(int j=0; j<=i; j++){
-                    sigma_loc_(i,j) *= fact;// * fourpi / ctx_->unit_cell().omega();
-                    sigma_loc_(j,i) = sigma_loc_(i,j);
-                }
-            }
-
-            // reduce over MPI (was distributed by G-vector)
-            ctx_->comm().allreduce(&sigma_loc_(0,0), 9 );
-
-            //------------------------------------------
-            // calc Evloc contributions to stress tensor
-            //------------------------------------------
-
-            // TODO get it from the finished DFT loop
-            double vloc_energy = valence_rho->inner(&potential_->local_potential());
-
-            for(int i: {0,1,2}){
-                sigma_loc_(i,i) += vloc_energy / ctx_->unit_cell().omega();
-            }
-
-            std::cout<<"local stress:"<<std::endl;
-            for(int i=0; i<3; i++){
-                for(int j=0; j<3; j++){
-                    std::cout<< sigma_loc_(i,j)<<" ";
-                }
-                std::cout<<std::endl;
-            }
-        }
+//        void calc_local_stress()
+//        {
+//            // density for convolution with potentials
+//            const Periodic_function<double>* valence_rho = density_->rho();
+//
+//            //------------------------------------------
+//            // calc dV/dG contributions to stress tensor
+//            //------------------------------------------
+//
+//            // generate gradient radial vloc integrals
+//            Vloc_radial_integrals vlri(ctx_, &ctx_->unit_cell());
+//            vlri.generate_g_gradient_radial_integrals();
+//
+//            Radial_integrals_vloc_dg ri_vloc_dg
+//
+//            std::vector<double_complex> dvloc_dg_local = ctx_->make_periodic_function<index_domain_t::local>();
+//
+//            // prepare for reduction
+//            sigma_loc_.zero();
+//            geometry3d::matrix3d<double>& sigma_loc = sigma_loc_;
+//
+//            // reduction of matrix3d type
+//            #pragma omp declare reduction( + : geometry3d::matrix3d<double> : omp_out += omp_in) \
+//                                           initializer( omp_priv = geometry3d::matrix3d<double>() )
+//
+//            #pragma omp parallel for reduction( + : sigma_loc )
+//            for(int igloc = 0; igloc < ctx_->gvec_count(); igloc++){
+//                int ig = ctx_->gvec_offset() + igloc;
+//
+//                if( ig==0 ){
+//                    continue;
+//                }
+//
+//                auto gvec_cart = ctx_->gvec().gvec_cart(ig);
+//                auto gvec_norm = gvec_cart.length();
+//
+//                double scalar_part = ( dvloc_dg_local(igloc) *  std::conj(valence_rho->f_pw_local(ig))  ).real() / gvec_norm;
+//
+//                for(int i=0; i<3; i++){
+//                    for(int j=0; j<=i; j++){
+//                        sigma_loc(i,j) += gvec_cart[i] * gvec_cart[j] * scalar_part;
+//                    }
+//                }
+//            }
+//
+//
+//            // if G-vectors are reduced
+//            double fact = ctx_->gvec().reduced() ? 2.0 : 1.0 ;
+//
+//            // multiply by scalars
+//            for(int i=0; i<3; i++){
+//                for(int j=0; j<=i; j++){
+//                    sigma_loc_(i,j) *= fact;// * fourpi / ctx_->unit_cell().omega();
+//                    sigma_loc_(j,i) = sigma_loc_(i,j);
+//                }
+//            }
+//
+//            // reduce over MPI (was distributed by G-vector)
+//            ctx_->comm().allreduce(&sigma_loc_(0,0), 9 );
+//
+//            //------------------------------------------
+//            // calc Evloc contributions to stress tensor
+//            //------------------------------------------
+//
+//            // TODO get it from the finished DFT loop
+//            double vloc_energy = valence_rho->inner(&potential_->local_potential());
+//
+//            for(int i: {0,1,2}){
+//                sigma_loc_(i,i) += vloc_energy / ctx_->unit_cell().omega();
+//            }
+//
+//            std::cout<<"local stress:"<<std::endl;
+//            for(int i=0; i<3; i++){
+//                for(int j=0; j<3; j++){
+//                    std::cout<< sigma_loc_(i,j)<<" ";
+//                }
+//                std::cout<<std::endl;
+//            }
+//        }
 
 
 
         void calc_non_local_stress()
         {
-            mdarray<double, 2> collect_result(Beta_projectors_lattice_gradient::num_, ctx_->unit_cell().num_atoms() );
+            mdarray<double, 2> collect_result(Beta_projectors_strain_deriv_gaunt::num_, ctx_->unit_cell().num_atoms() );
             //collect_result.zero();
 
             auto& spl_num_kp = kset_->spl_num_kpoints();
@@ -193,8 +190,8 @@ class Stress_PS
                 std::cout<<"------------ non-local stress kp ------------:"<<std::endl;
 
                 K_point* kp = kset_->k_point(spl_num_kp[ikploc]);
-                Beta_projectors_lattice_gradient bplg(&kp->beta_projectors(), ctx_);
-                Non_local_functor<double_complex, Beta_projectors_lattice_gradient::num_> nlf(ctx_,kset_,&bplg);
+                Beta_projectors_strain_deriv_gaunt bplg(&kp->beta_projectors(), ctx_);
+                Non_local_functor<double_complex, Beta_projectors_strain_deriv_gaunt::num_> nlf(ctx_,kset_,&bplg);
 
                 nlf.add_k_point_contribution(*kp,collect_result);
 
@@ -208,7 +205,7 @@ class Stress_PS
 
                     for(size_t i=0; i<3; i++){
                         for(size_t j=0; j<3; j++){
-                            sigma_non_loc_priv(i,j) += collect_result(Beta_projectors_lattice_gradient::ind(i,j), ia) * (1.0 / ctx_->unit_cell().omega());
+                            sigma_non_loc_priv(i,j) += collect_result(Beta_projectors_strain_deriv_gaunt::ind(i,j), ia) * (1.0 / ctx_->unit_cell().omega());
                         }
                     }
                 }
