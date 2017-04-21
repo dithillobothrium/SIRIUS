@@ -9,8 +9,9 @@
 #define __BETA_PROJECTORS_STRESS_H__
 
 #include "../utils.h"
-#include "Beta_projectors_array.h"
 #include "../Radial_integrals/Stress_radial_integrals.h"
+#include "beta_projectors_base.h"
+#include "beta_projectors.h"
 
 namespace sirius
 {
@@ -18,31 +19,24 @@ namespace sirius
 class Beta_projectors_strain_deriv_gaunt: public Beta_projectors_base<9>
 {
     protected:
-        const Simulation_context* ctx_;
-
-        mdarray<double_complex, 3> beta_gk_t_;
-
         // dimensions of a 3d matrix (f.e. stress tensor)
         static const size_t nu_ = 3;
         static const size_t nv_ = 3;
 
     public:
 
-        struct beta_besselJ_gaunt_coefs_t
+        struct lm2_gaund_coef_t
         {
-            int l1;
-            int m1;
-            int l2;
-            int m2;
-            std::array<double_complex, 3> prefac_gaunt_coefs;
+            int lm2;
+            double_complex prefac_gaunt_coef;
         };
 
-        Beta_projectors_strain_deriv_gaunt(Beta_projectors* bp__, const Simulation_context* ctx__)
-        : Beta_projectors_base<9>(bp__),
-          ctx_(ctx__)
+        Beta_projectors_strain_deriv_gaunt(Simulation_context& ctx__,
+                                           Gvec const&         gkvec__,
+                                           Beta_projectors&    beta__)
+        : Beta_projectors_base<9>(ctx__, gkvec__)
         {
-            init_beta_gk_t();
-            init_beta_gk();
+            generate_pw_coefs_t(beta__);
         }
 
         static size_t ind(size_t i, size_t j)
@@ -71,22 +65,18 @@ class Beta_projectors_strain_deriv_gaunt: public Beta_projectors_base<9>
             }
         }
 
-        void init_beta_gk_t()
+        void generate_pw_coefs_t(Beta_projectors& beta__)
         {
-            int num_beta_t = bp_->num_beta_by_atom_types();
+            double_complex const_prefac = double_complex(0.0 , 1.0) * fourpi * std::sqrt(fourpi / ( 3.0 * ctx_.unit_cell().omega() ));
 
-            //const std::vector<lpair>& lpairs = rad_int.radial_integrals_lpairs();
-            /* allocate array */
-            beta_gk_t_ = mdarray<double_complex, 3>(bp_->num_gkvec_loc(), num_beta_t, nu_);
-            beta_gk_t_.zero();
-
-            double const_prefac = fourpi * std::sqrt(fourpi / ( 3.0 * ctx_->unit_cell().omega() ));
-
+            auto& comm = gkvec_.comm();
 
             // compute
-            for (int iat = 0; iat < ctx_->unit_cell().num_atom_types(); iat++){
-                auto& atom_type = ctx_->unit_cell().atom_type(iat);
-                Stress_radial_integrals stress_radial_integrals(ctx_, &ctx_->unit_cell());
+            for (int iat = 0; iat < ctx_.unit_cell().num_atom_types(); iat++){
+                auto& atom_type = ctx_.unit_cell().atom_type(iat);
+
+                // TODO remove magic number
+                Stress_radial_integrals stress_radial_integrals(ctx_.unit_cell(), ctx_.gk_cutoff(), 20);
                 stress_radial_integrals.generate_beta_radial_integrals(iat);
 
                 // + 1 because max BesselJ l is lbeta + 1 in summation
@@ -95,92 +85,115 @@ class Beta_projectors_strain_deriv_gaunt: public Beta_projectors_base<9>
                 // get iterators of radial integrals
                 auto& rad_ints = stress_radial_integrals.beta_l2_integrals();
 
-                // TODO: make common array of gaunt coefs for all atom types
                 // array to store gaunt coeffs
-                std::vector<std::vector<beta_besselJ_gaunt_coefs_t>> beta_besselJ_gaunt_coefs;
+                std::vector< std::vector< std::array< std::vector<lm2_gaund_coef_t>, 3> > > rbidx_m1_l2_m2_betaJ_gaunt_coefs;
 
                 int nrb = atom_type.mt_radial_basis_size();
 
                 // generate gaunt coeffs and store
                 for (int idxrf = 0; idxrf < nrb; idxrf++){
                     int l1 = atom_type.indexr(idxrf).l;
-                    std::vector<beta_besselJ_gaunt_coefs_t> bj_gc;
+                    std::vector<std::array<std::vector<lm2_gaund_coef_t>,3>> m1_l2_m2_betaJ_gaunt_coefs;
 
-//                    std::cout<<"---------- "<<idxrf<<std::endl;
+                    //                    std::cout<<"---------- "<<idxrf<<std::endl;
 
-                    for(auto& l2_rad_int: rad_ints[idxrf]){
-                        int l2 = l2_rad_int.l2;
+                    //                        std::cout<<"l1l2 = "<<l1<<" "<<l2<<std::endl;
 
-                        double_complex prefac = std::pow(double_complex(0.0, -1.0), l2);
+                    for (int m1 = -l1; m1 <= l1; m1++){
+                        std::array<std::vector<lm2_gaund_coef_t>, nu_> l2_m2_betaJ_gaunt_coefs;
 
-//                        std::cout<<"l1l2 = "<<l1<<" "<<l2<<std::endl;
+                        for(auto& l2_rad_int: rad_ints[idxrf]){
+                            int l2 = l2_rad_int.l2;
 
-                        for (int m1 = -l1; m1 <= l1; m1++){
+                            double_complex prefac = std::pow(double_complex(0.0, -1.0), l2);
                             for (int m2 = -l2; m2 <= l2; m2++){
+                                int lm2 = Utils::lm_by_l_m(l2, m2);
                                 double_complex full_prefact = prefac * const_prefac;
-                                beta_besselJ_gaunt_coefs_t gc{
-                                    l1,m1,l2,m2,
-                                    {
-                                             -full_prefact * SHT::gaunt_rlm(l1, 1, l2,  m1, 1, m2  ),     // for x component
-                                             -full_prefact * SHT::gaunt_rlm(l1, 1, l2,  m1, -1, m2 ),     // for y component
-                                              full_prefact * SHT::gaunt_rlm(l1, 1, l2,  m1, 0, m2  )      // for z component
-                                    }
-                                };
-//                                std::cout<<"m1m2 = "<<m1<<" "<<m2<<std::endl;
-//                                for(int comp: {0,1,2}) std::cout<<gc.prefac_gaunt_coefs[comp]<<" ";
-//                                std::cout<<std::endl;
+                                l2_m2_betaJ_gaunt_coefs[0].push_back( {lm2, -full_prefact * SHT::gaunt_rlm(l1, 1, l2,  m1, 1, m2  )} );
+                                l2_m2_betaJ_gaunt_coefs[1].push_back( {lm2, -full_prefact * SHT::gaunt_rlm(l1, 1, l2,  m1, -1, m2 )} );
+                                l2_m2_betaJ_gaunt_coefs[2].push_back( {lm2,  full_prefact * SHT::gaunt_rlm(l1, 1, l2,  m1, 0, m2  )} );
 
-                                bj_gc.push_back(std::move(gc));
+                                //                                std::cout<<"m1m2 = "<<m1<<" "<<m2<<std::endl;
+                                //                                for(int comp: {0,1,2}) std::cout<<gc.prefac_gaunt_coefs[comp]<<" ";
+                                //                                std::cout<<std::endl;
                             }
                         }
+                        m1_l2_m2_betaJ_gaunt_coefs.push_back(std::move(l2_m2_betaJ_gaunt_coefs));
                     }
 
-                    beta_besselJ_gaunt_coefs.push_back(std::move(bj_gc));
+                    rbidx_m1_l2_m2_betaJ_gaunt_coefs.push_back(std::move(m1_l2_m2_betaJ_gaunt_coefs));
                 }
 
                 // iterate over gk vectors
                 //#pragma omp parallel for
-                for (int igkloc = 0; igkloc < bp_->num_gkvec_loc(); igkloc++)
+                for (int igkloc = 0; igkloc < gkvec_.gvec_count(comm.rank()); igkloc++)
                 {
-                    int igk   = bp_->gk_vectors().gvec_offset(bp_->comm().rank()) + igkloc;
-                    double gk = bp_->gk_vectors().gvec_len(igk);
+                    int igk = gkvec_.gvec_offset(comm.rank()) + igkloc;
+                    auto gk_cart = gkvec_.gkvec_cart(igk);
 
                     // vs = {r, theta, phi}
-                    auto vs = SHT::spherical_coordinates(bp_->gk_vectors().gkvec_cart(igk));
+                    auto vs = SHT::spherical_coordinates(gk_cart);
 
                     // compute real spherical harmonics for G+k vector
                     std::vector<double> gkvec_rlm(Utils::lmmax(lmax_jl));
                     SHT::spherical_harmonics(lmax_jl, vs[1], vs[2], &gkvec_rlm[0]);
 
-                    // SHOULD WORK
+                    // iterate over radial basis functions
                     for (int idxrf = 0; idxrf < nrb; idxrf++){
                         int l1 = atom_type.indexr(idxrf).l;
 
-                        // m1-l2-m2 iterator for gaunt coefficients
-                        int m1l2m2_it = 0;
+                        auto& l2_rad_ints_rf = rad_ints[idxrf];
 
-                        // get gaunt coefs between beta l1 and besselJ l2
-                        auto& bj_gc = beta_besselJ_gaunt_coefs[idxrf];
+                        // there are maximum 2 radial integrals
+                        double rad_ints_rf[] = {0.0, 0.0};
 
-                        for(auto& l2_rad_int: rad_ints[idxrf]){
-                            int l2 = l2_rad_int.l2;
+                        // store them in a static array
+                        for(size_t l2_rad_int_idx=0; l2_rad_int_idx < l2_rad_ints_rf.size(); l2_rad_int_idx++){
+                            rad_ints_rf[l2_rad_int_idx] = stress_radial_integrals.value_at(l2_rad_ints_rf[l2_rad_int_idx].rad_int, vs[0]);
+                        }
 
-                            // multiply radial integral and constants
-                            double radint = stress_radial_integrals.value_at(l2_rad_int.rad_int, gk);
+                        // get start index for basis functions
+                        int xi = atom_type.indexb().index_by_idxrf(idxrf);
 
-                            // get start index for basis functions
-                            int xi = atom_type.indexb().index_by_idxrf(idxrf);
+                        // iterate over m-components of current radial baiss function
+                        for (int im1 = 0; im1 < rbidx_m1_l2_m2_betaJ_gaunt_coefs[idxrf].size(); im1++, xi++){
 
-                            // iterate over m-components of l1 and l2
-                            for (int m1 = -l1; m1 <= l1; m1++, xi++){
-                                for (int m2 = -l2; m2 <= l2; m2++, m1l2m2_it++){
-                                    for(size_t comp = 0; comp < nu_; comp++){
-                                        beta_gk_t_(igkloc, atom_type.offset_lo() + xi, comp) += radint *
-                                                gkvec_rlm[ Utils::lm_by_l_m(l2, m2) ] * bj_gc[ m1l2m2_it ].prefac_gaunt_coefs[comp];
-                                        //std::cout<<m1l2m2_it<<" ";
+                            // iteration over column tensor index 'v'
+                            for(size_t v = 0; v < nv_; v++){
+
+                                // sum l2 m2 gaunt coefs and other stuff for given component and basis index xi
+                                // store the result in component
+                                double_complex component = 0.0;
+
+                                // get reference to the stored before gaunt coefficients
+                                auto& l2_m2_betaJ_gaunt_coefs = rbidx_m1_l2_m2_betaJ_gaunt_coefs[idxrf][im1][v];
+
+                                // l2-m2 iterator for gaunt coefficients
+                                int l2m2_idx = 0;
+
+                                // summing loop, may be can be collapsed and vectorized
+                                for(size_t l2_rad_int_idx=0; l2_rad_int_idx < l2_rad_ints_rf.size(); l2_rad_int_idx++){
+                                    int l2 = l2_rad_ints_rf[l2_rad_int_idx].l2;
+
+                                    for (int m2 = -l2; m2 <= l2; m2++, l2m2_idx++){
+                                        auto lm2_gc = l2_m2_betaJ_gaunt_coefs[l2m2_idx];
+                                        int lm2 = lm2_gc.lm2;
+
+                                        component += rad_ints_rf[l2_rad_int_idx] * gkvec_rlm[ lm2 ] * lm2_gc.prefac_gaunt_coef;
+                                        //beta_gk_t_(igkloc, atom_type.offset_lo() + xi, u)
                                     }
                                 }
+
+                                // iteratioon ove row tensor index 'u', add nondiag tensor components
+                                for(size_t u = 0; u < nu_; u++ ){
+                                    pw_coeffs_t_[ind(u,v)](igkloc, atom_type.offset_lo() + xi) = gk_cart[u] * component;
+                                }
+
+                                // add diagonal components
+                                pw_coeffs_t_[ind(v,v)](igkloc, atom_type.offset_lo() + xi) -= 0.5 * beta__.pw_coeffs_t(0)(igkloc, atom_type.offset_lo() + xi);
                             }
+
+
 
                             //std::cout<<"\n"<<bj_gc.size()<<std::endl;
                         }
@@ -205,81 +218,81 @@ class Beta_projectors_strain_deriv_gaunt: public Beta_projectors_base<9>
             }
         }
 
-        void init_beta_gk()
-        {
-            auto& unit_cell = ctx_->unit_cell();
-            int num_gkvec_loc = bp_->num_gkvec_loc();
-
-            // TODO maybe remove it
-            for(size_t i = 0; i < this->num_; i++)
-            {
-                components_gk_a_[i].zero();
-            }
-
-            //#pragma omp parallel for
-            for (int ia = 0; ia < unit_cell.num_atoms(); ia++) {
-
-                // prepare G+k phases
-                auto vk = bp_->gk_vectors().vk();
-                double phase = twopi * (vk * unit_cell.atom(ia).position());
-                double_complex phase_k = std::exp(double_complex(0.0, phase));
-
-                std::vector<double_complex> phase_gk(num_gkvec_loc);
-
-                for (int igk_loc = 0; igk_loc < num_gkvec_loc; igk_loc++) {
-                    int igk = bp_->gk_vectors().gvec_offset(bp_->comm().rank()) + igk_loc;
-                    auto G = bp_->gk_vectors().gvec(igk);
-                    phase_gk[igk_loc] = std::conj(ctx_->gvec_phase_factor(G, ia) * phase_k);
-                }
-
-
-                // TODO: need to optimize order of loops
-                // calc beta lattice gradient
-                for (int xi = 0; xi < unit_cell.atom(ia).mt_lo_basis_size(); xi++) {
-                    for (int igkloc = 0; igkloc < num_gkvec_loc; igkloc++) {
-                        int igk = bp_->gk_vectors().gvec_offset(bp_->comm().rank()) + igkloc;
-                        // TODO:store vectors before
-                        auto Gcart = bp_->gk_vectors().gkvec_cart(igk);
-
-                        // iteration over tensor components
-                        for(size_t u = 0; u < nu_; u++){
-                            for(size_t v = 0; v < nv_; v++){
-                                // complicate formula
-                                components_gk_a_[ind(u,v)](igkloc, unit_cell.atom(ia).offset_lo() + xi) =
-                                        // first
-                                        beta_gk_t_(igkloc, unit_cell.atom(ia).type().offset_lo() + xi, v) *
-                                        phase_gk[igkloc] * Gcart[u] * double_complex(0.0 , 1.0);
-                            }
-                        }
-
-                        // third
-                        for(size_t u = 0; u < nu_; u++){
-                            components_gk_a_[ind(u,u)](igkloc, unit_cell.atom(ia).offset_lo() + xi) -=
-                                    bp_->beta_gk_a()(igkloc, unit_cell.atom(ia).offset_lo() + xi) * 0.5;
-                        }
-//                        #pragma omp critical
-//                        {
-//                            std::cout<<"test non-local stress:"<<std::endl;
+//        void init_beta_gk()
+//        {
+//            auto& unit_cell = ctx_->unit_cell();
+//            int num_gkvec_loc = bp_->num_gkvec_loc();
 //
-//                                std::cout<<"G beta_gt= "<<Gcart<<"  |   ";
-//                                for(int j=0; j<3; j++){
-//                                    std::cout<<beta_gk_t_(igkloc, unit_cell.atom(ia).type().offset_lo() + xi, j) <<"  ";
-//                                }
-//                                std::cout<<std::endl;
+//            // TODO maybe remove it
+//            for(size_t i = 0; i < this->num_; i++)
+//            {
+//                components_gk_a_[i].zero();
+//            }
+//
+//            //#pragma omp parallel for
+//            for (int ia = 0; ia < unit_cell.num_atoms(); ia++) {
+//
+//                // prepare G+k phases
+//                auto vk = bp_->gk_vectors().vk();
+//                double phase = twopi * (vk * unit_cell.atom(ia).position());
+//                double_complex phase_k = std::exp(double_complex(0.0, phase));
+//
+//                std::vector<double_complex> phase_gk(num_gkvec_loc);
+//
+//                for (int igk_loc = 0; igk_loc < num_gkvec_loc; igk_loc++) {
+//                    int igk = bp_->gk_vectors().gvec_offset(bp_->comm().rank()) + igk_loc;
+//                    auto G = bp_->gk_vectors().gvec(igk);
+//                    phase_gk[igk_loc] = std::conj(ctx_->gvec_phase_factor(G, ia) * phase_k);
+//                }
 //
 //
-//                            for(int i=0; i<3; i++){
-//                                for(int j=0; j<3; j++){
-//                                    std::cout<<components_gk_a_[ind(i,j)](igkloc, unit_cell.atom(ia).offset_lo() + xi) <<"  ";
-//                                }
-//                                std::cout<<std::endl;
+//                // TODO: need to optimize order of loops
+//                // calc beta lattice gradient
+//                for (int xi = 0; xi < unit_cell.atom(ia).mt_lo_basis_size(); xi++) {
+//                    for (int igkloc = 0; igkloc < num_gkvec_loc; igkloc++) {
+//                        int igk = bp_->gk_vectors().gvec_offset(bp_->comm().rank()) + igkloc;
+//                        // TODO:store vectors before
+//                        auto Gcart = bp_->gk_vectors().gkvec_cart(igk);
+//
+//                        // iteration over tensor components
+//                        for(size_t u = 0; u < nu_; u++){
+//                            for(size_t v = 0; v < nv_; v++){
+//                                // complicate formula
+//                                components_gk_a_[ind(u,v)](igkloc, unit_cell.atom(ia).offset_lo() + xi) =
+//                                        // first
+//                                        beta_gk_t_(igkloc, unit_cell.atom(ia).type().offset_lo() + xi, v) *
+//                                        phase_gk[igkloc] * Gcart[u] * double_complex(0.0 , 1.0);
 //                            }
-//
 //                        }
-                    }
-                }
-            }
-        }
+//
+//                        // third
+//                        for(size_t u = 0; u < nu_; u++){
+//                            components_gk_a_[ind(u,v)](igkloc, unit_cell.atom(ia).offset_lo() + xi) -=
+//                                    bp_->beta_gk_a()(igkloc, unit_cell.atom(ia).offset_lo() + xi) * 0.5;
+//                        }
+////                        #pragma omp critical
+////                        {
+////                            std::cout<<"test non-local stress:"<<std::endl;
+////
+////                                std::cout<<"G beta_gt= "<<Gcart<<"  |   ";
+////                                for(int j=0; j<3; j++){
+////                                    std::cout<<beta_gk_t_(igkloc, unit_cell.atom(ia).type().offset_lo() + xi, j) <<"  ";
+////                                }
+////                                std::cout<<std::endl;
+////
+////
+////                            for(int i=0; i<3; i++){
+////                                for(int j=0; j<3; j++){
+////                                    std::cout<<components_gk_a_[ind(i,j)](igkloc, unit_cell.atom(ia).offset_lo() + xi) <<"  ";
+////                                }
+////                                std::cout<<std::endl;
+////                            }
+////
+////                        }
+//                    }
+//                }
+//            }
+//        }
 };
 
 }

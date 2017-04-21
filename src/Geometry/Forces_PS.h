@@ -15,6 +15,7 @@
 #include "../Beta_projectors/beta_projectors_gradient.h"
 #include "../potential.h"
 #include "../density.h"
+#include "Non_local_functor.h"
 
 namespace sirius {
 
@@ -38,9 +39,9 @@ class Forces_PS
     template<typename T>
     void add_k_point_contribution_to_nonlocal(K_point& kpoint, mdarray<double,2>& forces)
     {
-        Beta_projectors_gradient bp_grad(ctx_, kpoint.gkvec(), bp);
+        Beta_projectors_gradient bp_grad(ctx_, kpoint.gkvec(), kpoint.beta_projectors());
 
-        Non_local_functor<T,Beta_projectors_gradient::num_> nlf(ctx_,kset_,&bp_grad);
+        Non_local_functor<T, Beta_projectors_gradient::num_> nlf(ctx_, bp_grad);
 
         nlf.add_k_point_contribution(kpoint, forces);
 //        Unit_cell &unit_cell = ctx_.unit_cell();

@@ -190,8 +190,8 @@ class Stress_PS
                 std::cout<<"------------ non-local stress kp ------------:"<<std::endl;
 
                 K_point* kp = kset_->k_point(spl_num_kp[ikploc]);
-                Beta_projectors_strain_deriv_gaunt bplg(&kp->beta_projectors(), ctx_);
-                Non_local_functor<double_complex, Beta_projectors_strain_deriv_gaunt::num_> nlf(ctx_,kset_,&bplg);
+                Beta_projectors_strain_deriv_gaunt bplg(*ctx_, kp->gkvec(), kp->beta_projectors());
+                Non_local_functor<double_complex, Beta_projectors_strain_deriv_gaunt::num_> nlf(*ctx_, bplg);
 
                 nlf.add_k_point_contribution(*kp,collect_result);
 

@@ -36,9 +36,8 @@ class Stress_radial_integrals : public Radial_integrals_grid
 
     public:
         /// Constructor.
-        Stress_radial_integrals(const Simulation_context* ctx__,
-                              const Unit_cell* unit_cell__)
-        : Radial_integrals_base(ctx__, unit_cell__)
+        Stress_radial_integrals(Unit_cell const& unit_cell__, double qmax__, int np__)
+        : Radial_integrals_grid(unit_cell__, qmax__, np__)
         { }
 
         /// generate beta radial integral splines for given atom type index
@@ -48,7 +47,7 @@ class Stress_radial_integrals : public Radial_integrals_grid
 
             int iat = atom_type_idx__;
             atom_type_radial_integrals_.clear();
-            auto& atom_type = unit_cell_->atom_type(iat);
+            auto& atom_type = unit_cell_.atom_type(iat);
             int nrb = atom_type.mt_radial_basis_size();
 
             // beta radial splines
@@ -70,19 +69,19 @@ class Stress_radial_integrals : public Radial_integrals_grid
                 std::vector<l2_rad_int_t> l2_rad_ints;
 
                 if( l == 0){
-                    l2_rad_ints.push_back({1,Spline<double>(grid_gkmax_)});
+                    l2_rad_ints.push_back({1,Spline<double>(atom_type.radial_grid())});
                 } else {
-                    l2_rad_ints.push_back({l-1,Spline<double>(grid_gkmax_)});
-                    l2_rad_ints.push_back({l+1,Spline<double>(grid_gkmax_)});
+                    l2_rad_ints.push_back({l-1,Spline<double>(atom_type.radial_grid())});
+                    l2_rad_ints.push_back({l+1,Spline<double>(atom_type.radial_grid())});
                 }
 
                 atom_type_radial_integrals_.push_back(std::move(l2_rad_ints));
             }
 
             #pragma omp parallel for
-            for (int iq = 0; iq < grid_gkmax_.num_points(); iq++){
+            for (int iq = 0; iq < grid_q_.num_points(); iq++){
 
-                Spherical_Bessel_functions jl(unit_cell_->lmax() + 1, atom_type.radial_grid(), grid_gkmax_[iq]);
+                Spherical_Bessel_functions jl(unit_cell_.lmax() + 1, atom_type.radial_grid(), grid_q_[iq]);
 
                 for (int idxrf = 0; idxrf < nrb; idxrf++){
                     for(auto& l2_rad_int: atom_type_radial_integrals_[idxrf])
