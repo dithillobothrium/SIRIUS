@@ -224,7 +224,9 @@ class Stress_PS
 
 
 
-
+//            -538.887952    -0.422189    -0.645457
+//              -0.417923  -532.228697    -0.246414
+//              -0.643843    -0.243647  -535.292178
 
             // here one need to allreduce sigma_non_loc_priv or sigma_non_loc_
             // if we calculate only upper(lower)-triangular values of sigma_non_loc_priv
