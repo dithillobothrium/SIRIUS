@@ -233,6 +233,10 @@ class Stress_PS
 
             symmetrize(sigma_non_loc_);
 
+            const double au2kbar = 2.94210119E5;
+
+            sigma_non_loc_ *= au2kbar;
+
             std::cout<<"non-local stress:"<<std::endl;
             for(int i=0; i<3; i++){
                 for(int j=0; j<3; j++){

@@ -69,10 +69,10 @@ class Stress_radial_integrals : public Radial_integrals_grid
                 std::vector<l2_rad_int_t> l2_rad_ints;
 
                 if( l == 0){
-                    l2_rad_ints.push_back({1,Spline<double>(atom_type.radial_grid())});
+                    l2_rad_ints.push_back({1,Spline<double>(grid_q_)});
                 } else {
-                    l2_rad_ints.push_back({l-1,Spline<double>(atom_type.radial_grid())});
-                    l2_rad_ints.push_back({l+1,Spline<double>(atom_type.radial_grid())});
+                    l2_rad_ints.push_back({l-1,Spline<double>(grid_q_)});
+                    l2_rad_ints.push_back({l+1,Spline<double>(grid_q_)});
                 }
 
                 atom_type_radial_integrals_.push_back(std::move(l2_rad_ints));
@@ -89,7 +89,11 @@ class Stress_radial_integrals : public Radial_integrals_grid
                         // compute \int j_l2(|G+k|r) beta_l(r) r^3 dr
                         // remember that beta(r) are defined as miltiplied by r
                         int nr = atom_type.pp_desc().num_beta_radial_points[idxrf];
-                        l2_rad_int.rad_int[iq] = sirius::inner(jl[l2_rad_int.l2], rdists[idxrf], 2, nr);
+                        double val = sirius::inner(jl[l2_rad_int.l2], rdists[idxrf], 2, nr);
+
+                        //std::cout<<iq<<" "<< val<<std::endl;
+
+                        l2_rad_int.rad_int[iq] = val;
                     }
                 }
                 //printf("b_J rad_int %d %d ( ) = %f\n", l, l2, gdist[iq]);

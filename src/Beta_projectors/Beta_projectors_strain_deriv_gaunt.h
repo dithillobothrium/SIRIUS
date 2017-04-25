@@ -71,6 +71,11 @@ class Beta_projectors_strain_deriv_gaunt: public Beta_projectors_base<9>
 
             auto& comm = gkvec_.comm();
 
+            for(int i=0; i < num_; i++)
+            {
+                pw_coeffs_t_[i].zero();
+            }
+
             // compute
             for (int iat = 0; iat < ctx_.unit_cell().num_atom_types(); iat++){
                 auto& atom_type = ctx_.unit_cell().atom_type(iat);
@@ -113,9 +118,11 @@ class Beta_projectors_strain_deriv_gaunt: public Beta_projectors_base<9>
                                 l2_m2_betaJ_gaunt_coefs[1].push_back( {lm2, -full_prefact * SHT::gaunt_rlm(l1, 1, l2,  m1, -1, m2 )} );
                                 l2_m2_betaJ_gaunt_coefs[2].push_back( {lm2,  full_prefact * SHT::gaunt_rlm(l1, 1, l2,  m1, 0, m2  )} );
 
-                                //                                std::cout<<"m1m2 = "<<m1<<" "<<m2<<std::endl;
-                                //                                for(int comp: {0,1,2}) std::cout<<gc.prefac_gaunt_coefs[comp]<<" ";
-                                //                                std::cout<<std::endl;
+//                                std::cout<<"l2m1m2 = "<<l2<<" "<<m1<<" "<<m2<<std::endl;
+//                                for(int comp: {0,1,2}){
+//                                    std::cout<<l2_m2_betaJ_gaunt_coefs[comp][l2_m2_betaJ_gaunt_coefs[comp].size()-1].prefac_gaunt_coef<<" ";
+//                                }
+//                                std::cout<<std::endl;
                             }
                         }
                         m1_l2_m2_betaJ_gaunt_coefs.push_back(std::move(l2_m2_betaJ_gaunt_coefs));
@@ -151,6 +158,7 @@ class Beta_projectors_strain_deriv_gaunt: public Beta_projectors_base<9>
                         for(size_t l2_rad_int_idx=0; l2_rad_int_idx < l2_rad_ints_rf.size(); l2_rad_int_idx++){
                             rad_ints_rf[l2_rad_int_idx] = stress_radial_integrals.value_at(l2_rad_ints_rf[l2_rad_int_idx].rad_int, vs[0]);
                         }
+                        //std::cout<<l2_rad_ints_rf.size()<<" "<<vs[0]<<" "<< l2_rad_ints_rf[l2_rad_int_idx].rad_int <<rad_ints_rf[0]<<" "<<rad_ints_rf[1]<<std::endl;
 
                         // get start index for basis functions
                         int xi = atom_type.indexb().index_by_idxrf(idxrf);
@@ -172,7 +180,7 @@ class Beta_projectors_strain_deriv_gaunt: public Beta_projectors_base<9>
                                 int l2m2_idx = 0;
 
                                 // summing loop, may be can be collapsed and vectorized
-                                for(size_t l2_rad_int_idx=0; l2_rad_int_idx < l2_rad_ints_rf.size(); l2_rad_int_idx++){
+                                for(size_t l2_rad_int_idx = 0; l2_rad_int_idx < l2_rad_ints_rf.size(); l2_rad_int_idx++){
                                     int l2 = l2_rad_ints_rf[l2_rad_int_idx].l2;
 
                                     for (int m2 = -l2; m2 <= l2; m2++, l2m2_idx++){
@@ -184,15 +192,17 @@ class Beta_projectors_strain_deriv_gaunt: public Beta_projectors_base<9>
                                     }
                                 }
 
+
                                 // iteratioon ove row tensor index 'u', add nondiag tensor components
                                 for(size_t u = 0; u < nu_; u++ ){
                                     pw_coeffs_t_[ind(u,v)](igkloc, atom_type.offset_lo() + xi) = gk_cart[u] * component;
                                 }
+                            }
 
+                            for(size_t v = 0; v < nu_; v++ ){
                                 // add diagonal components
                                 pw_coeffs_t_[ind(v,v)](igkloc, atom_type.offset_lo() + xi) -= 0.5 * beta__.pw_coeffs_t(0)(igkloc, atom_type.offset_lo() + xi);
                             }
-
 
 
                             //std::cout<<"\n"<<bj_gc.size()<<std::endl;

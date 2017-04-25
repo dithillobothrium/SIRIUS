@@ -154,9 +154,9 @@ class DFT_ground_state
                 ewald_energy_ = ewald_energy();
             }
 
-            forces_ = std::unique_ptr<Forces_PS>(new Forces_PS(&ctx_, &density_, &potential_, &kset_));
+            forces_ = std::unique_ptr<Forces_PS>(new Forces_PS(ctx_, density_, potential_, kset_));
 
-            stress_ = std::unique_ptr<Stress_PS>(new Stress_PS(&ctx_, &density_, &potential_, &kset_));
+
         }
 
         mdarray<double, 2> forces();
@@ -532,7 +532,7 @@ inline void DFT_ground_state::forces(mdarray<double, 2>& inout_forces)
         print_forces( forces_->ewald_forces() );
     }
 
-    stress_->calc_local_stress();
+//    stress_->calc_local_stress();
     stress_->calc_non_local_stress();
 }
 

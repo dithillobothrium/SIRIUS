@@ -110,6 +110,8 @@ double ground_state(Simulation_context& ctx,
     if (!ctx.full_potential()) {
         //dft.forces();
         Stress s(ctx, ks, density, potential);
+        auto stress = std::unique_ptr<Stress_PS>(new Stress_PS(&ctx, &density, &potential, &ks));
+        stress->calc_non_local_stress();
     }
 
     if (write_output) {
