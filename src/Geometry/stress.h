@@ -254,7 +254,7 @@ class Stress {
         symmetrize(stress_vloc_);
     }
 
-    template <typename T, bool GauntMethod>
+    template <typename T>
     inline void calc_stress_nonloc()
     {
         PROFILE("sirius::Stress|nonloc");
@@ -270,21 +270,27 @@ class Stress {
             }
 
 
-            Beta_projectors_strain_deriv bp_strain_deriv(ctx_, kp->gkvec());
+            Beta_projectors_strain_deriv_gaunt bp_strain_deriv(ctx_, kp->gkvec(), kp->beta_projectors());
             Non_local_functor<T, Beta_projectors_strain_deriv_gaunt::num_> nlf(ctx_, bp_strain_deriv);
 
             nlf.add_k_point_contribution(*kp, collect_result);
         }
+        
+        #pragma omp declare reduction (+: geometry3d::matrix3d<double>: omp_out+=omp_in )
 
-        #pragma omp parallel for
+        geometry3d::matrix3d<double> tmp_stress;
+        
+        #pragma omp parallel for reduction(+:tmp_stress)
         for(size_t ia=0; ia < collect_result.size(1); ia++){
             for(size_t i=0; i<3; i++){
                 for(size_t j=0; j<3; j++){
-                    stress_nonloc_(i,j) -= collect_result(j*3+i, ia) * (1.0 / ctx_.unit_cell().omega());
+                    tmp_stress(i,j) -= collect_result(j*3+i, ia) * (1.0 / ctx_.unit_cell().omega());
                 }
             }
         }
 
+        stress_nonloc_ = tmp_stress;
+        
         ctx_.comm().allreduce(&stress_nonloc_(0, 0), 9 * sizeof(double));
 
         symmetrize(stress_nonloc_);

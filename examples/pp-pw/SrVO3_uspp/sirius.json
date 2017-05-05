@@ -7,7 +7,8 @@
         "verbosity" : 1,
         "verification" : 0,
         "print_memory_usage" : false,
-        "print_checksum" : false
+        "print_checksum" : false,
+        "print_stress" : true
     },
 
     "parameters" : {
