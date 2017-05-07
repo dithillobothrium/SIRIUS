@@ -350,7 +350,7 @@ class Atom_type
         mutable mdarray<double, 3> rf_coef_;
         mutable mdarray<double, 3> vrf_coef_;
 
-        std::vector<Spline<double>> beta_rf_;
+        mdarray<Spline<double>, 1> beta_rf_;
         mdarray<Spline<double>, 2> q_rf_;
 
         bool initialized_{false};
@@ -981,7 +981,7 @@ inline void Atom_type::init(int offset_lo__)
         /* maximum l of beta-projectors */
         int lmax_beta = indexr().lmax();
         /* interpolate beta radial functions */
-        beta_rf_ = std::vector<Spline<double>>(mt_radial_basis_size());
+        beta_rf_ = mdarray<Spline<double>, 1>(mt_radial_basis_size());
         for (int idxrf = 0; idxrf < nbrf; idxrf++) {
             beta_rf_[idxrf] = Spline<double>(radial_grid());
             int nr = pp_desc().num_beta_radial_points[idxrf];
@@ -991,15 +991,17 @@ inline void Atom_type::init(int offset_lo__)
             beta_rf_[idxrf].interpolate();
         }
         /* interpolate Q-operator radial functions */
-        q_rf_ = mdarray<Spline<double>, 2>(nbrf * (nbrf + 1) / 2, 2 * lmax_beta + 1);
-        #pragma omp parallel for
-        for (int idx = 0; idx < nbrf * (nbrf + 1) / 2; idx++) {
-            for (int l = 0; l <= 2 * lmax_beta; l++) {
-                q_rf_(idx, l) = Spline<double>(radial_grid());
-                for (int ir = 0; ir < num_mt_points(); ir++) {
-                    q_rf_(idx, l)[ir] = pp_desc().q_radial_functions_l(ir, idx, l);
+        if (pp_desc().augment) {
+            q_rf_ = mdarray<Spline<double>, 2>(nbrf * (nbrf + 1) / 2, 2 * lmax_beta + 1);
+            #pragma omp parallel for
+            for (int idx = 0; idx < nbrf * (nbrf + 1) / 2; idx++) {
+                for (int l = 0; l <= 2 * lmax_beta; l++) {
+                    q_rf_(idx, l) = Spline<double>(radial_grid());
+                    for (int ir = 0; ir < num_mt_points(); ir++) {
+                        q_rf_(idx, l)[ir] = pp_desc().q_radial_functions_l(ir, idx, l);
+                    }
+                    q_rf_(idx, l).interpolate();
                 }
-                q_rf_(idx, l).interpolate();
             }
         }
     }

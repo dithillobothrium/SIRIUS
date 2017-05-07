@@ -2,9 +2,8 @@ include ../make.inc
 
 .SUFFIXES: .cpp .cu .f90
 
-SRC =  LebedevLaikov.cpp force.cpp \
-       Geometry/Forces_PS.cpp \
-       Geometry/Stress_PS.cpp
+SRC =  LebedevLaikov.cpp force.cpp 
+    
 
 OBJ = $(SRC:.cpp=.o)
 

@@ -221,6 +221,7 @@ class Radial_integrals_rho_pseudo: public Radial_integrals_base<1>
     }
 };
 
+template <bool jl_deriv>
 class Radial_integrals_rho_core_pseudo: public Radial_integrals_base<1>
 {
   private:
@@ -242,7 +243,12 @@ class Radial_integrals_rho_core_pseudo: public Radial_integrals_base<1>
             for (int iq = 0; iq < grid_q_.num_points(); iq++) {
                 Spherical_Bessel_functions jl(0, atom_type.radial_grid(), grid_q_[iq]);
 
-                values_(iat)[iq] = sirius::inner(jl[0], ps_core, 2, atom_type.num_mt_points());
+                if (jl_deriv) {
+                    auto s = jl.deriv_q(0);
+                    values_(iat)[iq] = sirius::inner(s, ps_core, 2, atom_type.num_mt_points());
+                } else {
+                    values_(iat)[iq] = sirius::inner(jl[0], ps_core, 2, atom_type.num_mt_points());
+                }
             }
             values_(iat).interpolate();
         }
@@ -325,7 +331,7 @@ class Radial_integrals_beta_jl: public Radial_integrals_base<3>
 
     void generate()
     {
-        PROFILE("sirius::Radial_integrals|beta");
+        PROFILE("sirius::Radial_integrals|beta_jl");
     
         for (int iat = 0; iat < unit_cell_.num_atom_types(); iat++) {
             auto& atom_type = unit_cell_.atom_type(iat);
@@ -376,7 +382,14 @@ class Radial_integrals_beta_jl: public Radial_integrals_base<3>
     }
 };
 
-
+/// Radial integrals for the step function of the LAPW method.
+/** Radial integrals have the following expression:
+ *  \f[
+ *      \Theta(\alpha, G) = \int_{0}^{R_{\alpha}} \frac{\sin(Gr)}{Gr} r^2 dr =
+ *          \left\{ \begin{array}{ll} \displaystyle R_{\alpha}^3 / 3 & G=0 \\
+ *          \Big( \sin(GR_{\alpha}) - GR_{\alpha}\cos(GR_{\alpha}) \Big) / G^3 & G \ne 0 \end{array} \right.
+ *  \f]
+ */
 class Radial_integrals_theta: public Radial_integrals_base<1>
 {
   private:

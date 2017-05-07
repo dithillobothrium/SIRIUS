@@ -43,6 +43,7 @@ sirius::DFT_ground_state* dft_ground_state = nullptr;
 std::map<std::string, sddk::timer*> ftimers;
 
 std::unique_ptr<sirius::Stress> stress_tensor{nullptr};
+std::unique_ptr<sirius::Forces_PS> forces{nullptr};
 
 extern "C" {
 
@@ -2159,67 +2160,6 @@ void sirius_symmetrize_density()
     dft_ground_state->symmetrize(density->rho(), density->magnetization(0), density->magnetization(1), density->magnetization(2));
 }
 
-void sirius_get_rho_pw(ftn_int*            num_gvec__,
-                       ftn_int*            gvec__,
-                       ftn_double_complex* rho_pw__) // TODO: unify all get_pw() methods in a single function
-{
-
-    mdarray<int, 2> gvec(gvec__, 3, *num_gvec__);
-
-    for (int i = 0; i < *num_gvec__; i++) {
-        bool is_inverse{false};
-        vector3d<int> G(gvec(0, i), gvec(1, i), gvec(2, i));
-        int ig = sim_ctx->gvec().index_by_gvec(G);
-        if (ig == -1 && sim_ctx->gvec().reduced()) {
-            ig = sim_ctx->gvec().index_by_gvec(G * (-1));
-            is_inverse = true;
-        }
-        if (ig == -1) {
-            std::stringstream s;
-            auto gvc = sim_ctx->unit_cell().reciprocal_lattice_vectors() * vector3d<double>(G[0], G[1], G[2]);
-            s << "wrong index of G-vector" << std::endl
-              << "input G-vector: " << G << " (length: " << gvc.length() << " [a.u.^-1])" << std::endl;
-            TERMINATE(s);
-        }
-        //if (ig == -1 ) {
-        //    rho_pw__[i] = 0;
-        //    continue;
-        //}
-        if (is_inverse) {
-            rho_pw__[i] = std::conj(density->rho()->f_pw(ig));
-        } else {
-            rho_pw__[i] = density->rho()->f_pw(ig);
-        }
-    }
-}
-
-void sirius_get_veff_pw(ftn_int*            num_gvec__,
-                        ftn_int*            gvec__,
-                        ftn_double_complex* veff_pw__)
-{
-
-    mdarray<int, 2> gvec(gvec__, 3, *num_gvec__);
-
-    for (int i = 0; i < *num_gvec__; i++)
-    {
-        vector3d<int> G(gvec(0, i), gvec(1, i), gvec(2, i));
-        int ig = sim_ctx->gvec().index_by_gvec(G);
-        if (ig == -1) {
-            if (sim_ctx->gvec().reduced()) {
-                int ig1 = sim_ctx->gvec().index_by_gvec(G * (-1));
-                if (ig1 == -1) {
-                    TERMINATE("wrong index of G-vector");
-                }
-                veff_pw__[i] = std::conj(potential->effective_potential()->f_pw(ig1));
-            } else {
-                TERMINATE("wrong index of G-vector");
-            }
-        } else {
-            veff_pw__[i] = potential->effective_potential()->f_pw(ig);
-        }
-    }
-}
-
 void sirius_get_gvec_index(int32_t* gvec__, int32_t* ig__)
 {
     vector3d<int> gv(gvec__[0], gvec__[1], gvec__[2]);
@@ -2976,11 +2916,41 @@ void sirius_get_density_matrix(ftn_int*            ia__,
     }
 }
 
-void sirius_calc_forces(double* forces__)
+void sirius_calc_forces(ftn_int* kset_id__)
 {
-    mdarray<double,2> forces(forces__, 3, sim_ctx->unit_cell().num_atoms() );
+    auto& kset = *kset_list[*kset_id__];
+    forces = std::unique_ptr<sirius::Forces_PS>(new sirius::Forces_PS(*sim_ctx, *density, *potential, kset));
+}
 
-    dft_ground_state->forces(forces);
+void sirius_get_forces(ftn_char label__, ftn_double* forces__)
+{
+    std::string label(label__);
+
+    auto get_forces = [&](const mdarray<double,2>& sirius_forces__)
+        {
+            #pragma omp parallel for
+            for (size_t i = 0; i < sirius_forces__.size(); i++){
+                forces__[i] = sirius_forces__[i];
+            }
+        };
+
+    if (label == "vloc") {
+        get_forces(forces->local_forces());
+    } else if (label == "nlcc") {
+        get_forces(forces->nlcc_forces());
+    } else if (label == "ewald") {
+        get_forces(forces->ewald_forces());
+    } else if (label == "nl") {
+        get_forces(forces->nonlocal_forces());
+    } else if (label == "us") {
+        get_forces(forces->ultrasoft_forces());
+    } else if (label == "usnl") {
+        get_forces(forces->us_nl_forces());
+    } else if (label == "tot") {
+        get_forces(forces->total_forces());
+    } else {
+        TERMINATE("wrong label");
+    }
 }
 
 void sirius_set_verbosity(ftn_int* level__)
@@ -3026,43 +2996,128 @@ void sirius_set_pw_coeffs(ftn_char label__,
         Communicator comm(MPI_Comm_f2c(*comm__));
         mdarray<int, 2> gvec(gvl__, 3, *ngv__);
 
-        if (label == "rho") {
-            density->rho()->zero();
-            for (int i = 0; i < *ngv__; i++) {
-                vector3d<int> G(gvec(0, i), gvec(1, i), gvec(2, i));
-                int ig = sim_ctx->gvec().index_by_gvec(G);
-                if (ig >= 0) {
-                    density->rho()->f_pw(ig) = pw_coeffs__[i];
-                }
+        std::vector<double_complex> v(sim_ctx->gvec().num_gvec(), 0);
+        for (int i = 0; i < *ngv__; i++) {
+            vector3d<int> G(gvec(0, i), gvec(1, i), gvec(2, i));
+            int ig = sim_ctx->gvec().index_by_gvec(G);
+            if (ig >= 0) {
+                v[ig] = pw_coeffs__[i];
             }
-            comm.allreduce(&density->rho()->f_pw(0), sim_ctx->gvec().num_gvec());
+        }
+        comm.allreduce(v.data(), sim_ctx->gvec().num_gvec());
+
+        if (label == "rho") {
+            density->rho()->scatter_f_pw(v);
             density->rho()->fft_transform(1);
         } else if (label == "veff") {
-            potential->effective_potential()->zero();
-            for (int i = 0; i < *ngv__; i++) {
-                vector3d<int> G(gvec(0, i), gvec(1, i), gvec(2, i));
-                int ig = sim_ctx->gvec().index_by_gvec(G);
-                if (ig >= 0) {
-                    potential->effective_potential()->f_pw(ig) = pw_coeffs__[i];
-                }
-            }
-            comm.allreduce(&potential->effective_potential()->f_pw(0), sim_ctx->gvec().num_gvec());
+            potential->effective_potential()->scatter_f_pw(v);
             potential->effective_potential()->fft_transform(1);
         } else if (label == "vxc") {
-            potential->xc_potential()->zero();
-            for (int i = 0; i < *ngv__; i++) {
-                vector3d<int> G(gvec(0, i), gvec(1, i), gvec(2, i));
-                int ig = sim_ctx->gvec().index_by_gvec(G);
-                if (ig >= 0) {
-                    potential->xc_potential()->f_pw(ig) = pw_coeffs__[i];
-                }
-            }
-        
-            comm.allreduce(&potential->xc_potential()->f_pw(0), sim_ctx->gvec().num_gvec());
+            potential->xc_potential()->scatter_f_pw(v);
             potential->xc_potential()->fft_transform(1);
         } else {
             TERMINATE("wrong label");
         }
+    }
+}
+
+void sirius_get_pw_coeffs(ftn_char label__,
+                          double_complex* pw_coeffs__,
+                          ftn_int* ngv__,
+                          ftn_int* gvl__, 
+                          ftn_int* comm__)
+{
+    std::string label(label__);
+    if (sim_ctx->full_potential()) {
+        STOP();
+    } else {
+        assert(ngv__ != NULL);
+        assert(gvl__ != NULL);
+        assert(comm__ != NULL);
+
+        Communicator comm(MPI_Comm_f2c(*comm__));
+        mdarray<int, 2> gvec(gvl__, 3, *ngv__);
+
+        std::vector<double_complex> v;
+
+        if (label == "rho") {
+            v = density->rho()->gather_f_pw();
+        } else if (label == "veff") {
+            v = potential->effective_potential()->gather_f_pw();
+        } else if (label == "vloc") {
+            v = potential->local_potential().gather_f_pw();
+        } else if (label == "rhoc") {
+            v = density->rho_pseudo_core().gather_f_pw();
+        } else {
+            TERMINATE("wrong label");
+        }
+
+        for (int i = 0; i < *ngv__; i++) {
+            vector3d<int> G(gvec(0, i), gvec(1, i), gvec(2, i));
+            
+            bool is_inverse{false};
+            int ig = sim_ctx->gvec().index_by_gvec(G);
+            if (ig == -1 && sim_ctx->gvec().reduced()) {
+                ig = sim_ctx->gvec().index_by_gvec(G * (-1));
+                is_inverse = true;
+            }
+            if (ig == -1) {
+                std::stringstream s;
+                auto gvc = sim_ctx->unit_cell().reciprocal_lattice_vectors() * vector3d<double>(G[0], G[1], G[2]);
+                s << "wrong index of G-vector" << std::endl
+                  << "input G-vector: " << G << " (length: " << gvc.length() << " [a.u.^-1])" << std::endl;
+                TERMINATE(s);
+            }
+            if (is_inverse) {
+                pw_coeffs__[i] = std::conj(v[ig]);
+            } else {
+                pw_coeffs__[i] = v[ig];
+            }
+        }
+    }
+}
+
+void sirius_get_pw_coeffs_real(ftn_char    atom_type__,
+                               ftn_char    label__,  
+                               ftn_double* pw_coeffs__,
+                               ftn_int*    ngv__,
+                               ftn_int*    gvl__, 
+                               ftn_int*    comm__)
+{
+    std::string label(label__);
+    std::string atom_label(atom_type__);
+    int iat = sim_ctx->unit_cell().atom_type(atom_label).id();
+
+    auto make_pw_coeffs = [&](std::function<double(double)> f)
+    {
+        mdarray<int, 2> gvec(gvl__, 3, *ngv__);
+        
+        double fourpi_omega = fourpi / sim_ctx->unit_cell().omega();
+        #pragma omp parallel for
+        for (int i = 0; i < *ngv__; i++) {
+            auto gc = sim_ctx->unit_cell().reciprocal_lattice_vectors() *  vector3d<int>(gvec(0, i), gvec(1, i), gvec(2, i));
+            pw_coeffs__[i] = fourpi_omega * f(gc.length());
+        }
+    };
+    
+    if (label == "rhoc") {
+        sirius::Radial_integrals_rho_core_pseudo<false> ri(sim_ctx->unit_cell(), sim_ctx->pw_cutoff(), 20);
+        make_pw_coeffs([&ri, iat](double g)
+                       {
+                           return ri.value(iat, g);
+                       });
+    } else if (label == "rhoc_dg") {
+        sirius::Radial_integrals_rho_core_pseudo<true> ri(sim_ctx->unit_cell(), sim_ctx->pw_cutoff(), 20);
+        make_pw_coeffs([&ri, iat](double g)
+                       {
+                           return ri.value(iat, g);
+                       });
+    } else if (label == "vloc") {
+        sirius::Radial_integrals_vloc ri(sim_ctx->unit_cell(), sim_ctx->pw_cutoff(), 100);
+        make_pw_coeffs([&ri, iat](double g)
+                       {
+                           return ri.value(iat, g);
+                       });
     }
 }
 
