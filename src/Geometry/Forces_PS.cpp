@@ -7,6 +7,7 @@
 
 #include "Forces_PS.h"
 #include "../k_point_set.h"
+#include "omp_reducer.h"
 
 using namespace geometry3d;
 
@@ -242,26 +243,6 @@ void Forces_PS::calc_nonlocal_forces(mdarray<double,2>& forces)
     symmetrize_forces(unsym_forces, forces);
 }
 
-
-//-----------------------------------------
-// for omp reduction
-//------------------------------------------
-template<typename T>
-void init_mdarray2d(mdarray<T,2> &priv, mdarray<T,2> &orig )
-{
-    priv = mdarray<double,2>(orig.size(0),orig.size(1)); priv.zero();
-}
-
-template<typename T>
-void add_mdarray2d(mdarray<T,2> &in, mdarray<T,2> &out)
-{
-    for(size_t i = 0; i < in.size(1); i++ ) {
-        for(size_t j = 0; j < in.size(0); j++ ) {
-            out(j,i) += in(j,i);
-        }
-    }
-}
-
 //---------------------------------------------------------------
 //---------------------------------------------------------------
 void Forces_PS::calc_ewald_forces(mdarray<double,2>& forces)
@@ -272,7 +253,6 @@ void Forces_PS::calc_ewald_forces(mdarray<double,2>& forces)
 
     forces.zero();
 
-    #pragma omp declare reduction( + : mdarray<double,2> : add_mdarray2d(omp_in, omp_out))  initializer( init_mdarray2d(omp_priv, omp_orig) )
 
 
     // 1 / ( 2 sigma^2 )
