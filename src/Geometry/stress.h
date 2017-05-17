@@ -289,8 +289,8 @@ class Stress {
         
         #pragma omp parallel for reduction(+:tmp_stress)
         for(size_t ia=0; ia < collect_result.size(1); ia++){
-            for(size_t i=0; i<3; i++){
-                for(size_t j=0; j<3; j++){
+            for(int i=0; i<3; i++){
+                for(int j=0; j<3; j++){
                     tmp_stress(i,j) -= collect_result(j*3+i, ia) * (1.0 / ctx_.unit_cell().omega());
                 }
             }

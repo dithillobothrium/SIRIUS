@@ -20,8 +20,8 @@ class Beta_projectors_strain_deriv_gaunt: public Beta_projectors_base<9>
 {
 protected:
     // dimensions of a 3d matrix (f.e. stress tensor)
-    static const size_t nu_ = 3;
-    static const size_t nv_ = 3;
+    static const int nu_ = 3;
+    static const int nv_ = 3;
 
 public:
 
@@ -39,7 +39,7 @@ public:
         generate_pw_coefs_t(beta__);
       }
 
-    static size_t ind(size_t i, size_t j)
+    static int ind(int i, int j)
     {
         return i * nu_ + j;
         //return (i + 1) * i / 2 + j ;
@@ -150,10 +150,10 @@ public:
                     int xi = atom_type.indexb().index_by_idxrf(idxrf);
 
                     // iterate over m-components of current radial baiss function
-                    for (int im1 = 0; im1 < rbidx_m1_l2_m2_betaJ_gaunt_coefs[idxrf].size(); im1++, xi++){
+                    for (int im1 = 0; im1 < (int)rbidx_m1_l2_m2_betaJ_gaunt_coefs[idxrf].size(); im1++, xi++){
 
                         // iteration over column tensor index 'v'
-                        for(size_t v = 0; v < nv_; v++){
+                        for(int v = 0; v < nv_; v++){
 
                             // sum l2 m2 gaunt coefs and other stuff for given component and basis index xi
                             // store the result in component
@@ -179,12 +179,12 @@ public:
                             }
 
                             // iteratioon ove row tensor index 'u', add nondiag tensor components
-                            for(size_t u = 0; u < nu_; u++ ){
+                            for(int u = 0; u < nu_; u++ ){
                                 pw_coeffs_t_[ind(u,v)](igkloc, atom_type.offset_lo() + xi) = gk_cart[u] * component;
                             }
                         }
 
-                        for(size_t v = 0; v < nu_; v++ ){
+                        for(int v = 0; v < nu_; v++ ){
                             // add diagonal components
                             pw_coeffs_t_[ind(v,v)](igkloc, atom_type.offset_lo() + xi) -= 0.5 * beta__.pw_coeffs_t(0)(igkloc, atom_type.offset_lo() + xi);
                         }
