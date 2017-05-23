@@ -26,7 +26,7 @@
 #define __STRESS_H__
 
 #include "../Beta_projectors/beta_projectors_strain_deriv.h"
-#include "../Beta_projectors/beta_projectors_strain_deriv_gaunt.h"
+#include "../Beta_projectors/Beta_projectors_strain_deriv_gaunt.h"
 #include "omp_reducer.h"
 
 namespace sirius {

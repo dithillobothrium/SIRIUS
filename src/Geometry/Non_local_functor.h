@@ -51,8 +51,8 @@ public:
         #ifdef __GPU
         for (int ispn = 0; ispn < ctx_.num_spins(); ispn++) {
             if (ctx_.processing_unit() == GPU) {
-                int nbnd = kpoint.num_occupied_bands(ispn);
-                kpoint.spinor_wave_functions(ispn).copy_to_device(0, nbnd);
+                int nbnd = kpoint__.num_occupied_bands(ispn);
+                kpoint__.spinor_wave_functions(ispn).copy_to_device(0, nbnd);
             }
         }
         #endif
