@@ -193,7 +193,7 @@ public:
             }
         }
         if (ctx_.processing_unit() == GPU) {
-            for (int x = 0; x < 3; x++) {
+            for (int x = 0; x < num_; x++) {
                 pw_coeffs_t_[x].copy<memory_t::host, memory_t::device>();
             }
         }

@@ -64,7 +64,7 @@ class Beta_projectors_base
     matrix<double_complex> pw_coeffs_a_;
 
   public:
-    static const size_t num_ = N;
+    static const int num_ = N;
 
     Beta_projectors_base(Simulation_context& ctx__,
                          Gvec         const& gkvec__)

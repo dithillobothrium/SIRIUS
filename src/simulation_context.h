@@ -25,7 +25,7 @@
 #ifndef __SIMULATION_CONTEXT_H__
 #define __SIMULATION_CONTEXT_H__
 
-#include "simulation_parameters.h"
+#include "simulation_context_base.h"
 #include "mpi_grid.hpp"
 #include "step_function.h"
 #include "version.h"
