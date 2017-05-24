@@ -551,8 +551,8 @@ class Stress {
                 TERMINATE("reduced G+k vectors are not implemented for non-local stress: fix this");
             }
 
-            //Beta_projectors_strain_deriv bp_strain_deriv(ctx_, kp->gkvec());
-            Beta_projectors_strain_deriv_gaunt bp_strain_deriv(ctx_, kp->gkvec(), kp->beta_projectors());
+            Beta_projectors_strain_deriv bp_strain_deriv(ctx_, kp->gkvec());
+            //Beta_projectors_strain_deriv_gaunt bp_strain_deriv(ctx_, kp->gkvec(), kp->beta_projectors());
             Non_local_functor<T, 9> nlf(ctx_, bp_strain_deriv);
 
             nlf.add_k_point_contribution(*kp, collect_result);
