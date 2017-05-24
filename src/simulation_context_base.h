@@ -28,7 +28,7 @@
 #include "version.h"
 #include "simulation_parameters.h"
 #include "mpi_grid.hpp"
-#include "radial_integrals.h"
+#include "Radial_integrals/radial_integrals.h"
 
 #ifdef __GPU
 extern "C" void generate_phase_factors_gpu(int num_gvec_loc__,

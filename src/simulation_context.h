@@ -30,6 +30,7 @@
 #include "step_function.h"
 #include "version.h"
 #include "augmentation_operator.h"
+#include "Radial_integrals/radial_integrals.h"
 #include "Beta_projectors/beta_projector_chunks.h"
 
 #ifdef __GPU

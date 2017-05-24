@@ -26,6 +26,8 @@
 #define __STRESS_H__
 
 #include "../Beta_projectors/beta_projectors_strain_deriv.h"
+#include "../Beta_projectors/beta_projectors_strain_deriv_gaunt.h"
+#include "omp_reducer.h"
 
 namespace sirius {
 
@@ -517,15 +519,15 @@ class Stress {
      *    -\frac{1}{2\sqrt{\Omega}} \delta_{\mu \nu} \int e^{-i{\bf q r}} \beta_{\xi}^{\alpha}({\bf r}) d{\bf r} + 
      *    \frac{1}{\sqrt{\Omega}} \int i r_{\nu} q_{\mu} e^{-i{\bf q r}} \beta_{\xi}^{\alpha}({\bf r}) d{\bf r}
      * \f]
-     * (second term comes from the strain derivative of \f$ e^{-i{\bf q r}} \f$). Remembering that \f$ {\bf r} \f$ is
+     * (second term comes from the strain derivative of \f$ e^{-i{\bf q r}} \f$).
      * proportional to p-like real spherical harmonics, we can rewrite the second part of beta-projector derivative as:
      * \f[
-     *   \frac{1}{\sqrt{\Omega}} \int i r_{\nu} q_{\mu} e^{-i{\bf q r}} \beta_{\xi}^{\alpha}({\bf r}) d{\bf r} = 
+     *   \frac{1}{\sqrt{\Omega}} \int i r_{\nu} q_{\mu} e^{-i{\bf q r}} \beta_{\xi}^{\alpha}({\bf r}) d{\bf r} =
      *    \frac{1}{\sqrt{\Omega}} i q_{\mu} \int r \bar R_{1 \nu}(\theta, \phi) 4\pi \sum_{\ell_3 m_3} (-i)^{\ell_3} R_{\ell_3 m_3}(\theta_q, \phi_q)
      *    R_{\ell_3 m_3}(\theta, \phi) j_{\ell_3}(q r) \beta_{\ell_2}^{\alpha}(r) R_{\ell_2 m_2}(\theta, \phi) d{\bf r} = \\
-     *     \frac{4 \pi}{\sqrt{\Omega}} i q_{\mu} \sum_{\ell_3 m_3} (-i)^{\ell_3} R_{\ell_3 m_3}(\theta_q, \phi_q) 
+     *     \frac{4 \pi}{\sqrt{\Omega}} i q_{\mu} \sum_{\ell_3 m_3} (-i)^{\ell_3} R_{\ell_3 m_3}(\theta_q, \phi_q)
      *     \langle \bar R_{1\nu} | R_{\ell_3 m_3} | R_{\ell_2 m_2} \rangle
-     *     \int j_{\ell_3}(q r) \beta_{\ell_2}^{\alpha}(r) r^3 dr 
+     *     \int j_{\ell_3}(q r) \beta_{\ell_2}^{\alpha}(r) r^3 dr
      * \f]
      * where
      * \f[
@@ -539,72 +541,39 @@ class Stress {
     {
         PROFILE("sirius::Stress|nonloc");
 
-        auto& bchunk = ctx_.beta_projector_chunks();
+        mdarray<double, 2> collect_result(9, ctx_.unit_cell().num_atoms() );
+        collect_result.zero();
 
         for (int ikloc = 0; ikloc < kset_.spl_num_kpoints().local_size(); ikloc++) {
             int ik = kset_.spl_num_kpoints(ikloc);
             auto kp = kset_[ik];
             if (kp->gkvec().reduced()) {
-                TERMINATE("fix this");
+                TERMINATE("reduced G+k vectors are not implemented for non-local stress: fix this");
             }
 
-            auto d_mtrx = [&](Atom& atom, int ibnd, int i, int j)
-            {
-                if (atom.type().pp_desc().augment) {
-                    return atom.d_mtrx(i, j, 0) - kp->band_energy(ibnd) * ctx_.augmentation_op(atom.type_id()).q_mtrx(i, j);
-                } else {
-                    return atom.d_mtrx(i, j, 0);
-                }
-            };
+            //Beta_projectors_strain_deriv bp_strain_deriv(ctx_, kp->gkvec());
+            Beta_projectors_strain_deriv_gaunt bp_strain_deriv(ctx_, kp->gkvec(), kp->beta_projectors());
+            Non_local_functor<T, 9> nlf(ctx_, bp_strain_deriv);
 
-            Beta_projectors_strain_deriv bp_strain_deriv(ctx_, kp->gkvec());
-
-            kp->beta_projectors().prepare();
-            bp_strain_deriv.prepare();
-
-            for (int ichunk = 0; ichunk < bchunk.num_chunks(); ichunk++) {
-                kp->beta_projectors().generate(ichunk);
-
-                int nbnd = kp->num_occupied_bands(0);
-                splindex<block> spl_nbnd(nbnd, kp->comm().size(), kp->comm().rank());
-
-                /* compute <beta|psi> */
-                auto beta_psi = kp->beta_projectors().inner<T>(ichunk, kp->spinor_wave_functions(0), 0, nbnd);
-
-                for (int mu = 0; mu < 3; mu++) {
-                    for (int nu = 0; nu < 3; nu++) {
-                        bp_strain_deriv.generate(ichunk, mu + nu * 3);
-                        auto dbeta_psi = bp_strain_deriv.inner<T>(ichunk, kp->spinor_wave_functions(0), 0, nbnd);
-
-                        for (int i = 0; i < bchunk(ichunk).num_atoms_; i++) {
-                            int ia   = bchunk(ichunk).desc_(beta_desc_idx::ia, i);
-                            int offs = bchunk(ichunk).desc_(beta_desc_idx::offset, i);
-                            int nbf  = bchunk(ichunk).desc_(beta_desc_idx::nbf, i);
-
-                            auto& atom = ctx_.unit_cell().atom(ia);
-
-                            for (int ibnd_loc = 0; ibnd_loc < spl_nbnd.local_size(); ibnd_loc++) {
-                                int ibnd = spl_nbnd[ibnd_loc];
-                                double w = kp->weight() * kp->band_occupancy(ibnd);
-
-                                for (int xi1 = 0; xi1 < nbf; xi1++) {
-                                    for (int xi2 = 0; xi2 < nbf; xi2++) {
-                                        stress_nonloc_(mu, nu) += w * std::real(
-                                            std::conj(dbeta_psi(offs + xi1, ibnd)) * d_mtrx(atom, ibnd, xi1, xi2) * beta_psi(offs + xi2, ibnd) +
-                                            std::conj(beta_psi(offs + xi1, ibnd)) * d_mtrx(atom, ibnd, xi1, xi2) * dbeta_psi(offs + xi2, ibnd)
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            kp->beta_projectors().dismiss();
+            nlf.add_k_point_contribution(*kp, collect_result);
         }
-        ctx_.comm().allreduce(&stress_nonloc_(0, 0), 9);
+        
+        #pragma omp declare reduction (+: geometry3d::matrix3d<double>: omp_out+=omp_in )
 
-        stress_nonloc_ *= (1.0 / ctx_.unit_cell().omega());
+        geometry3d::matrix3d<double> tmp_stress;
+        
+        #pragma omp parallel for reduction(+:tmp_stress)
+        for(size_t ia=0; ia < collect_result.size(1); ia++){
+            for(int i=0; i<3; i++){
+                for(int j=0; j<3; j++){
+                    tmp_stress(i,j) -= collect_result(j*3+i, ia) * (1.0 / ctx_.unit_cell().omega());
+                }
+            }
+        }
+
+        stress_nonloc_ = tmp_stress;
+        
+        ctx_.comm().allreduce(&stress_nonloc_(0, 0), 9);
 
         symmetrize(stress_nonloc_);
 
@@ -680,88 +649,105 @@ class Stress {
                 }
             }
             t0.stop();
-            mdarray<double, 2> q_tmp(nbf * (nbf + 1) / 2, ctx_.gvec().count() * 2);
+            mdarray<double, 2> q_tmp(3 * nbf * (nbf + 1) / 2, ctx_.gvec().count() * 2);
             mdarray<double, 2> v_tmp(atom_type.num_atoms(), ctx_.gvec().count() * 2);
-            mdarray<double, 2> tmp(nbf * (nbf + 1) / 2, atom_type.num_atoms());
+            mdarray<double, 2> tmp(3 * nbf * (nbf + 1) / 2, atom_type.num_atoms());
+
+            int igloc0{0};
+
+            int nbf_sq_tri = nbf * (nbf + 1) / 2;
+
+            if (ctx_.comm().rank() == 0) {
+                for (int ia = 0; ia < atom_type.num_atoms(); ia++) {
+                    v_tmp(ia, 0) = v_tmp(ia, 1) = 0;
+                }
+                for (int i = 0; i < nbf_sq_tri; i++) {
+                    for(int mu = 0; mu < 3; mu++){
+                        q_tmp(3*i + mu, 0) = q_tmp(mu * nbf_sq_tri + i, 1) = 0;
+                    }
+                }
+                igloc0 = 1;
+            }
+
+            #pragma omp parallel for schedule(static)
+            for (int igloc = igloc0; igloc < ctx_.gvec().count(); igloc++) {
+                for (int ia = 0; ia < atom_type.num_atoms(); ia++) {
+                    auto z = phase_factors(ia, igloc) * std::conj(potential_.effective_potential()->f_pw_local(igloc));
+                    v_tmp(ia, 2 * igloc)     = z.real();
+                    v_tmp(ia, 2 * igloc + 1) = z.imag();
+                }
+            }
+
             for (int nu = 0; nu < 3; nu++) {
                 q_deriv.generate_pw_coeffs(iat, ri, ri_dq, nu);
 
-                for (int mu = 0; mu < 3; mu++) {
-                    sddk::timer t2("sirius::Stress|us|prepare");
-                    int igloc0{0};
-                    if (ctx_.comm().rank() == 0) {
-                        for (int i = 0; i < nbf * (nbf + 1) / 2; i++) {
-                            q_tmp(i, 0) = q_tmp(i, 1) = 0;
-                        }
-                        for (int ia = 0; ia < atom_type.num_atoms(); ia++) {
-                            v_tmp(ia, 0) = v_tmp(ia, 1) = 0;
-                        }
-                        igloc0 = 1;
-                    }
-                    #pragma omp parallel for schedule(static)
-                    for (int igloc = igloc0; igloc < ctx_.gvec().count(); igloc++) {
-                        int ig = ctx_.gvec().offset() + igloc;
-                        auto gvc = ctx_.gvec().gvec_cart(ig);
-                        double g = gvc.length();
-                        for (int i = 0; i < nbf * (nbf + 1) / 2; i++) {
-                            auto z = double_complex(q_deriv.q_pw(i, 2 * igloc), q_deriv.q_pw(i, 2 * igloc + 1)) * (-gvc[mu] / g);
-                            q_tmp(i, 2 * igloc)     = z.real();
-                            q_tmp(i, 2 * igloc + 1) = z.imag();
-                        }
-                        for (int ia = 0; ia < atom_type.num_atoms(); ia++) {
-                            auto z = phase_factors(ia, igloc) * std::conj(potential_.effective_potential()->f_pw_local(igloc));
-                            v_tmp(ia, 2 * igloc)     = z.real();
-                            v_tmp(ia, 2 * igloc + 1) = z.imag();
+                sddk::timer t2("sirius::Stress|us|prepare");
+                #pragma omp parallel for schedule(static)
+                for (int igloc = igloc0; igloc < ctx_.gvec().count(); igloc++) {
+                    int ig = ctx_.gvec().offset() + igloc;
+                    auto gvc = ctx_.gvec().gvec_cart(ig);
+                    double invg = 1.0 / gvc.length();
+                    for (int i = 0; i < nbf_sq_tri; i++) {
+                        double re = invg * q_deriv.q_pw(i, 2 * igloc);
+                        double im = invg * q_deriv.q_pw(i, 2 * igloc + 1);
+                        for (int mu = 0; mu < 3; mu++) {
+                            int imu = 3*i + mu;
+                            q_tmp(imu, 2 * igloc)     = -gvc[mu] * re;
+                            q_tmp(imu, 2 * igloc + 1) = -gvc[mu] * im;
                         }
                     }
-                    t2.stop();
-                    
-                    //tmp.zero();
-                    //for (int ia = 0; ia < atom_type.num_atoms(); ia++) {
-                    //    int iaglob = atom_type.atom_id(ia);
-                    //    for (int i = 0; i < nbf * (nbf + 1) / 2; i++) {
-                    //        for (int igloc = igloc0; igloc < ctx_.gvec().count(); igloc++) {
-                    //            int ig = ctx_.gvec().offset() + igloc;
-                    //            auto gvc = ctx_.gvec().gvec_cart(ig);
-                    //            double g = gvc.length();
-                    //            tmp(i, ia) += std::real(
-                    //                    double_complex(q_deriv.q_pw(i, 2 * igloc), q_deriv.q_pw(i, 2 * igloc + 1)) *
-                    //                    std::conj(potential_.effective_potential()->f_pw_local(igloc)) * (-gvc[mu] / g) *
-                    //                    double_complex(phase_factors(ia, 2 * igloc), phase_factors(ia, 2 * igloc + 1))
-                    //                    );
-                    //        }
-                    //    }
-                    //}
-                    
-                    /* canonical code */
-                    //for (int igloc = igloc0; igloc < ctx_.gvec().count(); igloc++) {
-                    //    int ig = ctx_.gvec().offset() + igloc;
-                    //    auto gvc = ctx_.gvec().gvec_cart(ig);
-                    //    double g = gvc.length();
-                    //    for (int ia = 0; ia < atom_type.num_atoms(); ia++) {
-                    //        int iaglob = atom_type.atom_id(ia);
-                    //        for (int i = 0; i < nbf * (nbf + 1) / 2; i++) {
-                    //            stress_us_(mu, nu) += std::real(
-                    //                double_complex(q_deriv.q_pw(i, 2 * igloc), q_deriv.q_pw(i, 2 * igloc + 1)) *
-                    //                std::conj(potential_.effective_potential()->f_pw_local(igloc)) * (-gvc[mu] / g) *
-                    //                double_complex(phase_factors(ia, 2 * igloc), phase_factors(ia, 2 * igloc + 1)) *
-                    //                dm(i, ia, 0) * q_deriv.sym_weight(i)
-                    //            );
 
-                    //        }
-                    //    }
-                    //}
+                }
+                t2.stop();
 
-                    sddk::timer t1("sirius::Stress|us|gemm");
-                    linalg<CPU>::gemm(0, 1, nbf * (nbf + 1) / 2, atom_type.num_atoms(), 2 * ctx_.gvec().count(),
-                                      q_tmp, v_tmp, tmp);
-                    t1.stop();
-                    for (int ia = 0; ia < atom_type.num_atoms(); ia++) {
-                        for (int i = 0; i < nbf * (nbf + 1) / 2; i++) {
-                            stress_us_(mu, nu) += tmp(i, ia) * dm(i, ia, 0) * q_deriv.sym_weight(i);
+                sddk::timer t1("sirius::Stress|us|gemm");
+                linalg<CPU>::gemm(0, 1, 3 * nbf * (nbf + 1) / 2, atom_type.num_atoms(), 2 * ctx_.gvec().count(),
+                                  q_tmp, v_tmp, tmp);
+                t1.stop();
+
+                for (int ia = 0; ia < atom_type.num_atoms(); ia++) {
+                    for (int i = 0; i < nbf * (nbf + 1) / 2; i++) {
+                        for (int mu = 0; mu < 3; mu++) {
+                            stress_us_(mu, nu) += tmp(3*i + mu, ia) * dm(i, ia, 0) * q_deriv.sym_weight(i);
                         }
                     }
                 }
+                
+                //tmp.zero();
+                //for (int ia = 0; ia < atom_type.num_atoms(); ia++) {
+                //    int iaglob = atom_type.atom_id(ia);
+                //    for (int i = 0; i < nbf * (nbf + 1) / 2; i++) {
+                //        for (int igloc = igloc0; igloc < ctx_.gvec().count(); igloc++) {
+                //            int ig = ctx_.gvec().offset() + igloc;
+                //            auto gvc = ctx_.gvec().gvec_cart(ig);
+                //            double g = gvc.length();
+                //            tmp(i, ia) += std::real(
+                //                    double_complex(q_deriv.q_pw(i, 2 * igloc), q_deriv.q_pw(i, 2 * igloc + 1)) *
+                //                    std::conj(potential_.effective_potential()->f_pw_local(igloc)) * (-gvc[mu] / g) *
+                //                    double_complex(phase_factors(ia, 2 * igloc), phase_factors(ia, 2 * igloc + 1))
+                //                    );
+                //        }
+                //    }
+                //}
+                
+                /* canonical code */
+                //for (int igloc = igloc0; igloc < ctx_.gvec().count(); igloc++) {
+                //    int ig = ctx_.gvec().offset() + igloc;
+                //    auto gvc = ctx_.gvec().gvec_cart(ig);
+                //    double g = gvc.length();
+                //    for (int ia = 0; ia < atom_type.num_atoms(); ia++) {
+                //        int iaglob = atom_type.atom_id(ia);
+                //        for (int i = 0; i < nbf * (nbf + 1) / 2; i++) {
+                //            stress_us_(mu, nu) += std::real(
+                //                double_complex(q_deriv.q_pw(i, 2 * igloc), q_deriv.q_pw(i, 2 * igloc + 1)) *
+                //                std::conj(potential_.effective_potential()->f_pw_local(igloc)) * (-gvc[mu] / g) *
+                //                double_complex(phase_factors(ia, 2 * igloc), phase_factors(ia, 2 * igloc + 1)) *
+                //                dm(i, ia, 0) * q_deriv.sym_weight(i)
+                //            );
+                
+                //        }
+                //    }
+                //}
             }
         }
 

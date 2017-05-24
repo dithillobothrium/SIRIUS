@@ -25,42 +25,58 @@
 #ifndef __RADIAL_INTEGRALS_H__
 #define __RADIAL_INTEGRALS_H__
 
-#include "Unit_cell/unit_cell.h"
-#include "sbessel.h"
+#include "../Unit_cell/unit_cell.h"
+#include "../sbessel.h"
 
 namespace sirius {
 
-/// Base class for all kinds of radial integrals.
+/// class for all kinds of radial integrals with only radial q-grid implementation.
+class Radial_integrals_grid
+{
+    protected:
+      /// Unit cell.
+      Unit_cell const& unit_cell_;
+
+      /// Linear grid of q-points on which the interpolation of radial integrals is done.
+      Radial_grid<double> grid_q_;
+
+    public:
+      /// Constructor.
+      Radial_integrals_grid(Unit_cell const& unit_cell__, double qmax__, int np__)
+          : unit_cell_(unit_cell__)
+      {
+          grid_q_ = Radial_grid_lin<double>(static_cast<int>(np__ * qmax__), 0, qmax__);
+      }
+
+      inline std::pair<int, double> iqdq(double q__) const
+      {
+          std::pair<int, double> result;
+          /* find index of q-point */
+          result.first = static_cast<int>((grid_q_.num_points() - 1) * q__ / grid_q_.last());
+          /* delta q = q - q_i */
+          result.second = q__ - grid_q_[result.first];
+          return std::move(result);
+      }
+
+      inline double value_at(const Spline<double>& integral__, double q__) const
+      {
+          auto iqdq_val = iqdq(q__);
+          return integral__(iqdq_val.first, iqdq_val.second);
+      }
+};
+
+/// Class for almost all kinds of radial integrals
 template <int N>
-class Radial_integrals_base
+class Radial_integrals_base: public Radial_integrals_grid
 {
   protected:
-    /// Unit cell.
-    Unit_cell const& unit_cell_;
-    
-    /// Linear grid of q-points on which the interpolation of radial integrals is done.
-    Radial_grid<double> grid_q_;
-   
     /// Array with integrals.
     mdarray<Spline<double>, N> values_;
     
   public:
     /// Constructor.
     Radial_integrals_base(Unit_cell const& unit_cell__, double qmax__, int np__)
-        : unit_cell_(unit_cell__)
-    {
-        grid_q_ = Radial_grid_lin<double>(static_cast<int>(np__ * qmax__), 0, qmax__);
-    }
-    
-    inline std::pair<int, double> iqdq(double q__) const
-    {
-        std::pair<int, double> result;
-        /* find index of q-point */
-        result.first = static_cast<int>((grid_q_.num_points() - 1) * q__ / grid_q_.last());
-        /* delta q = q - q_i */
-        result.second = q__ - grid_q_[result.first];
-        return std::move(result);
-    }
+        : Radial_integrals_grid(unit_cell__, qmax__, np__) { }
 };
 
 /// Radial integrals of the augmentation operator.
@@ -326,7 +342,7 @@ class Radial_integrals_beta_jl: public Radial_integrals_base<3>
 
     void generate()
     {
-        PROFILE("sirius::Radial_integrals|beta");
+        PROFILE("sirius::Radial_integrals|beta_jl");
     
         for (int iat = 0; iat < unit_cell_.num_atom_types(); iat++) {
             auto& atom_type = unit_cell_.atom_type(iat);
@@ -380,7 +396,7 @@ class Radial_integrals_beta_jl: public Radial_integrals_base<3>
 /// Radial integrals for the step function of the LAPW method.
 /** Radial integrals have the following expression:
  *  \f[
- *      \Theta(\alpha, G) = \int_{0}^{R_{\alpha}} \frac{\sin(Gr)}{Gr} r^2 dr = 
+ *      \Theta(\alpha, G) = \int_{0}^{R_{\alpha}} \frac{\sin(Gr)}{Gr} r^2 dr =
  *          \left\{ \begin{array}{ll} \displaystyle R_{\alpha}^3 / 3 & G=0 \\
  *          \Big( \sin(GR_{\alpha}) - GR_{\alpha}\cos(GR_{\alpha}) \Big) / G^3 & G \ne 0 \end{array} \right.
  *  \f]
