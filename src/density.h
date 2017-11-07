@@ -161,6 +161,9 @@ class Density
             /// ae and ps local unified densities+magnetization
             std::vector<Spheric_function<spectral, double>> ae_density_;
             std::vector<Spheric_function<spectral, double>> ps_density_;
+
+            /// density from relativistic small component
+            std::vector<Spheric_function<spectral, double>> ae_rel_small_density_;
         };
 
         std::vector<paw_density_data_t> paw_density_data_;

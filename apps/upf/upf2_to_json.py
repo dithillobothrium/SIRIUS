@@ -74,11 +74,11 @@ def parse_non_local(upf_dict, root):
         #upf_dict['beta_projectors'][i]['cutoff_radius_index'] = int(node.attrib['cutoff_radius_index'])
         upf_dict['beta_projectors'][i]['cutoff_radius'] = float(node.attrib['cutoff_radius'])
         upf_dict['beta_projectors'][i]['ultrasoft_cutoff_radius'] = float(node.attrib['ultrasoft_cutoff_radius'])
-        #if upf_dict['header']['SpinOrbit']: 
+        #if upf_dict['header']['SpinOrbit']:
         #  node1 = root.findall("./PP_SPIN_ORB/PP_RELBETA.%i"%(i+1))[0]
         #  upf_dict['beta_projectors'][i]['total_angular_momentum'] = float(node1.attrib['jjj'])
-          
-          
+
+
     #--------------------------
     #------- Dij matrix -------
     #--------------------------
@@ -134,7 +134,7 @@ def parse_PAW(upf_dict, root):
     node = root.findall('./PP_NONLOCAL/PP_AUGMENTATION')[0]
     upf_dict['header']['cutoff_radius_index'] = int(node.attrib['cutoff_r_index'])
 
-    
+
     upf_dict["paw_data"] = {}
 
 
@@ -165,8 +165,22 @@ def parse_PAW(upf_dict, root):
         wfc['index'] =  int(node.attrib['index']) - 1
         upf_dict['paw_data']['ae_wfc'].append(wfc)
 
+    # ----- Read small component of relativistic AE wfc for Spin-Orbit-----
+    if upf_dict['header']['SpinOrbit'] == True :
 
-    #----- Read PS wfc -----
+        upf_dict['paw_data']['ae_wfc_rel_small'] = []
+
+        for i in range(nb):
+            wfc={}
+            node = root.findall("./PP_FULL_WFC/PP_AEWFC_REL.%i"%(i+1))[0]
+            wfc['radial_function'] = [float(e) for e in str.split(node.text)]
+            wfc['angular_momentum'] = int(node.attrib['l'])
+            wfc['angular_momentum_j'] = float(node.attrib['j'])
+            wfc['label'] = node.attrib['label']
+            wfc['index'] =  int(node.attrib['index']) - 1
+            upf_dict['paw_data']['ae_wfc_rel_small'].append(wfc)
+
+    # ----- Read PS wfc -----
     upf_dict['paw_data']['ps_wfc']=[]
 
     for i in range(nb):
@@ -246,7 +260,7 @@ def parse_SpinOrbit(upf_dict, root):
 #      upf_dict['paw_data']['ae_wfc']['ae_wfc_rel'] = float(node)
 #      upf_dict['paw_data']['ae_wfc']['total_angular_momentum'] = float(node('jchi'))
 #      upf_dict['paw_data']['ps_wfc']['total_angular_momentum'] = float(node('jchi'))
- 
+
 
 ######################################################
 ################## MAIN ##############################
@@ -289,7 +303,7 @@ def main():
 
     # parse data for spin orbit coupling
     parse_SpinOrbit(upf_dict, root)
-    
+
     # rho
     node = root.findall("./PP_RHOATOM")[0]
     rho = [float(e) for e in str.split(node.text)]

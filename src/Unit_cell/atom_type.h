@@ -1479,40 +1479,44 @@ inline void Atom_type::read_pseudo_paw(json const& parser)
     /* setups for reading AE and PS basis wave functions */
     int num_wfc = pp_desc_.num_beta_radial_functions;
 
+    /* allocate memory for PAW wave functions*/
     pp_desc_.all_elec_wfc = mdarray<double, 2>(num_mt_points_, num_wfc);
     pp_desc_.pseudo_wfc   = mdarray<double, 2>(num_mt_points_, num_wfc);
 
     pp_desc_.all_elec_wfc.zero();
     pp_desc_.pseudo_wfc.zero();
 
+    /* if we have spin-orbit then allocate for small component */
+    if (pp_desc_.spin_orbit_coupling) {
+        pp_desc_.all_elec_rel_small_wfc = mdarray<double, 2>(num_mt_points_, num_wfc);
+        pp_desc_.all_elec_rel_small_wfc.zero();
+    }
+
+    auto parse_wfc = [&](std::vector<double>&& source_data_wfc, double* dest_ptr)
+    {
+        if ((int)source_data_wfc.size() > num_mt_points_) {
+            std::stringstream s;
+            s << "wrong size of beta functions for atom type " << symbol_ << " (label: " << label_ << ")" << std::endl
+                    << "size of beta radial functions in the file: " << wfc.size() << std::endl
+                    << "radial grid size: " << num_mt_points_;
+            TERMINATE(s);
+        }
+
+        std::memcpy(dest_ptr, source_data_wfc.data(), (pp_desc_.cutoff_radius_index) * sizeof(double));
+    };
+
     /* read ae and ps wave functions */
     for (int i = 0; i < num_wfc; i++) {
         /* read ae wave func */
-        auto wfc = parser["pseudo_potential"]["paw_data"]["ae_wfc"][i]["radial_function"].get<std::vector<double>>();
-
-        if ((int)wfc.size() > num_mt_points_) {
-            std::stringstream s;
-            s << "wrong size of beta functions for atom type " << symbol_ << " (label: " << label_ << ")" << std::endl
-              << "size of beta radial functions in the file: " << wfc.size() << std::endl
-              << "radial grid size: " << num_mt_points_;
-            TERMINATE(s);
-        }
-
-        std::memcpy(&pp_desc_.all_elec_wfc(0, i), wfc.data(), (pp_desc_.cutoff_radius_index) * sizeof(double));
+        parse_wfc(parser["pseudo_potential"]["paw_data"]["ae_wfc"][i]["radial_function"].get<std::vector<double>>(), &pp_desc_.all_elec_wfc(0, i));
 
         /* read ps wave func */
-        wfc.clear();
+        parse_wfc(parser["pseudo_potential"]["paw_data"]["ps_wfc"][i]["radial_function"].get<std::vector<double>>(), &pp_desc_.pseudo_wfc(0, i));
 
-        wfc = parser["pseudo_potential"]["paw_data"]["ps_wfc"][i]["radial_function"].get<std::vector<double>>();
-
-        if ((int)wfc.size() > num_mt_points_) {
-            std::stringstream s;
-            s << "wrong size of beta functions for atom type " << symbol_ << " (label: " << label_ << ")" << std::endl
-              << "size of beta radial functions in the file: " << wfc.size() << std::endl
-              << "radial grid size: " << num_mt_points_;
-            TERMINATE(s);
+        /* read small relativistic component if we have spin orbit*/
+        if (pp_desc_.spin_orbit_coupling) {
+            parse_wfc(parser["pseudo_potential"]["paw_data"]["ae_wfc_rel_small"][i]["radial_function"].get<std::vector<double>>(), &pp_desc_.all_elec_rel_small_wfc(0, i));
         }
-        std::memcpy(&pp_desc_.pseudo_wfc(0, i), wfc.data(), (pp_desc_.cutoff_radius_index) * sizeof(double));
     }
 }
 
