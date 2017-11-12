@@ -28,13 +28,20 @@ inline void Density::init_paw()
 
         pdd.ia = ia;
 
-        // allocate density arrays
+        /* allocate density arrays , 1,2 or 4 components*/
         for (int i = 0; i < ctx_.num_mag_dims() + 1; i++) {
             pdd.ae_density_.push_back(Spheric_function<spectral, double>(lm_max_rho, pdd.atom_->radial_grid()));
             pdd.ps_density_.push_back(Spheric_function<spectral, double>(lm_max_rho, pdd.atom_->radial_grid()));
+        }
 
-            if (atom.type().pp_desc().spin_orbit_coupling) {
+        if (atom.type().pp_desc().spin_orbit_coupling) {
+            /* 4 components for small density */
+            for (int i = 0; i < ctx_.num_mag_dims() + 1; i++) {
                 pdd.ae_rel_small_density_.push_back(Spheric_function<spectral, double>(lm_max_rho, pdd.atom_->radial_grid()));
+            }
+            /* 3 components for magnetization part in spatial view (1,2,3 component of density array) */
+            for (int i = 0; i < ctx_.num_mag_dims() ; i++) {
+                ae_rel_small_magn_comp_[i] = Spheric_function<sht_->num_points(), double>(lm_max_rho, pdd.atom_->radial_grid());
             }
         }
 
@@ -89,6 +96,13 @@ inline void Density::init_density_matrix_for_paw()
     }
 }
 
+
+inline void Density::add_rel_small_magnetization()
+{
+
+}
+
+
 inline void Density::generate_paw_atom_density(paw_density_data_t &pdd)
 {
     int ia = pdd.ia;
@@ -117,9 +131,6 @@ inline void Density::generate_paw_atom_density(paw_density_data_t &pdd)
     auto &grid = atom_type.radial_grid();
     std::vector<double> inv_r2_grid();
 
-    for(int irad = 0; irad < (int)grid.num_points(); irad++){
-
-    }
     /* iterate over local basis functions (or over lm1 and lm2) */
     for (int ib2 = 0; ib2 < atom_type.indexb().size(); ib2++){
         for(int ib1 = 0; ib1 <= ib2; ib1++){
@@ -162,40 +173,44 @@ inline void Density::generate_paw_atom_density(paw_density_data_t &pdd)
                 }
             }
 
-            for (int imagn = 0; imagn < ctx_.num_mag_dims() + 1; imagn++) {
-                Spheric_function<spectral, double>& ae_dens = pdd.ae_density_[imagn];
-                Spheric_function<spectral, double>& ps_dens = pdd.ps_density_[imagn];
+            /* add nonzero coefficients */
+            for(int inz = 0; inz < num_non_zero_gk; inz++){
+                auto& lm3coef = GC.gaunt(lm1,lm2,inz);
 
-                /* add nonzero coefficients */
-                for(int inz = 0; inz < num_non_zero_gk; inz++){
-                    auto& lm3coef = GC.gaunt(lm1,lm2,inz);
 
                     /* iterate over radial points */
                     for(int irad = 0; irad < (int)grid.num_points(); irad++){
 
                         /* we need to divide density over r^2 since wave functions are stored multiplied by r */
-                        double prefac = dm[imagn] * diag_coef * grid.x_inv() * grid.x_inv() * lm3coef.coef;
+                        double prefac = dm[imagn] * diag_coef * grid.x_inv(irad) * grid.x_inv(irad) * lm3coef.coef;
 
                         /* calculate unified density/magnetization
                          * dm_ij * GauntCoef * ( phi_i phi_j  +  Q_ij) */
-                        ae_dens(lm3coef.lm3, irad) += prefac * pp_desc.all_elec_wfc(irad,irb1) * pp_desc.all_elec_wfc(irad,irb2);
-                        ps_dens(lm3coef.lm3, irad) += prefac * (pp_desc.pseudo_wfc(irad,irb1) * pp_desc.pseudo_wfc(irad,irb2) +
+                        pdd.ae_density_[imagn](lm3coef.lm3, irad) += prefac * pp_desc.all_elec_wfc(irad,irb1) * pp_desc.all_elec_wfc(irad,irb2);
+                        pdd.ps_density_[imagn](lm3coef.lm3, irad) += prefac * (pp_desc.pseudo_wfc(irad,irb1) * pp_desc.pseudo_wfc(irad,irb2) +
                                                                 pp_desc.q_radial_functions_l(irad,iqij,l_by_lm[lm3coef.lm3]));
                     }
-
+                    /* in case of spin-orbit add small component to 4-component density*/
                     if (atom.type().pp_desc().spin_orbit_coupling) {
                         /* iterate over radial points */
                         for(int irad = 0; irad < (int)grid.num_points(); irad++){
 
-                            double dens = dm[imagn] * diag_coef * grid.x_inv() * grid.x_inv() * lm3coef.coef *
+                            double dens = dm[imagn] * diag_coef * grid.x_inv(irad) * grid.x_inv(irad) * lm3coef.coef *
                                     pp_desc.all_elec_rel_small_wfc(irad,irb1) * pp_desc.all_elec_rel_small_wfc(irad,irb2);
 
-                            ae_dens(lm3coef.lm3, irad) += dens;
-                            pdd.ae_rel_small_density_ += dens;
+                            pdd.ae_density_[imagn](lm3coef.lm3, irad) += dens;
+                            pdd.ae_rel_small_density_[imagn](lm3coef.lm3, irad) += dens;
                         }
                     }
                 }
             }
+        }
+    }
+
+    /* in case of spin-orbit also need to add component to magnetization in spatial representation*/
+    if (atom.type().pp_desc().spin_orbit_coupling) {
+        for (int imagn = 0; imagn < ctx_.num_mag_dims() /* should be 3*/ ; imagn++) {
+
         }
     }
 }
@@ -205,6 +220,8 @@ inline void Density::generate_paw_loc_density()
     if (!unit_cell_.num_paw_atoms()) {
         return;
     }
+
+    PROFILE("sirius::Potential::generate_PAW_effective_potential");
 
     #pragma omp parallel for
     for (int i = 0; i < unit_cell_.spl_num_paw_atoms().local_size(); i++) {

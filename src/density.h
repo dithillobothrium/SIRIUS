@@ -164,9 +164,14 @@ class Density
 
             /// density from relativistic small component
             std::vector<Spheric_function<spectral, double>> ae_rel_small_density_;
+
+            /// contribution to magnetization is calculated on a spatial grid
+            std::array<Spheric_function<spatial, double>, 3> ae_rel_small_magn_comp_;
         };
 
         std::vector<paw_density_data_t> paw_density_data_;
+
+        std::unique_ptr<SHT> sht_;
 
         /// Pointer to charge density.
         /** In the case of full-potential calculation this is the full (valence + core) electron charge density.
@@ -349,6 +354,8 @@ class Density
             rho_ = std::unique_ptr<Periodic_function<double>>(new Periodic_function<double>(ctx_, ctx_.lmmax_rho()));
             rho_vec_[0] = rho_.get();
             
+            sht_ = std::unique_ptr<SHT>(new SHT(ctx_.lmax_rho()));
+
             /* allocate magnetization density */
             for (int i = 0; i < ctx_.num_mag_dims(); i++) {
                 magnetization_[i] = std::unique_ptr<Periodic_function<double>>(new Periodic_function<double>(ctx_, ctx_.lmmax_rho()));
