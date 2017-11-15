@@ -19,7 +19,7 @@
       
       "gamma_point" : true,
 
-      "num_mag_dims" : 0,
+      "num_mag_dims" : 1,
 
       "gk_cutoff" : 6.0,
       "pw_cutoff" : 20.00,

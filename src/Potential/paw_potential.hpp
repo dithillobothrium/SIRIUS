@@ -284,8 +284,8 @@ Potential::xc_mt_PAW_noncollinear(std::vector<Spheric_function<spatial, double>>
 
     /* collinear case */
     if (ctx_.num_mag_dims() == 1) {
-        vxc_tp[0] =  0.5 * (vxc_u_tp + vxc_d_tp);
-        vxc_tp[1] =  0.5 * (vxc_u_tp + vxc_d_tp);
+        vxc_tp.push_back(0.5 * (vxc_u_tp + vxc_d_tp));
+        vxc_tp.push_back(0.5 * (vxc_u_tp + vxc_d_tp));
     }
 
     /* non-collinear case */
@@ -411,8 +411,8 @@ inline void Potential::calc_PAW_local_potential(paw_potential_data_t &ppd,
 
             /* convert to lm */
             for (int i = 0; i < ctx_.num_mag_dims() + 1; i++) {
-                ppd.ae_potential_[i] = transform(sht_.get(), ae_potential[i]);
-                ppd.ps_potential_[i] = transform(sht_.get(), ps_potential[i]);
+                ppd.ae_potential_[i] += transform(sht_.get(), ae_potential[i]);
+                ppd.ps_potential_[i] += transform(sht_.get(), ps_potential[i]);
             }
 
             /* utilise AE potential in theta phi to compute G function from PRB 82, 075116 2010 */
