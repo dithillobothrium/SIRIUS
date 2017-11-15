@@ -1497,7 +1497,7 @@ inline void Atom_type::read_pseudo_paw(json const& parser)
         if ((int)source_data_wfc.size() > num_mt_points_) {
             std::stringstream s;
             s << "wrong size of beta functions for atom type " << symbol_ << " (label: " << label_ << ")" << std::endl
-                    << "size of beta radial functions in the file: " << wfc.size() << std::endl
+                    << "size of beta radial functions in the file: " << source_data_wfc.size() << std::endl
                     << "radial grid size: " << num_mt_points_;
             TERMINATE(s);
         }

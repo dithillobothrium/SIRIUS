@@ -124,6 +124,9 @@ class Potential
             std::vector<Spheric_function<spectral, double>> ae_potential_;
             std::vector<Spheric_function<spectral, double>> ps_potential_;
 
+            /* used in case of spin orbit */
+            std::vector<Spheric_function<spectral, double>> g_function_;
+
             double hartree_energy_{0.0};
             double xc_energy_{0.0};
             double core_energy_{0.0};
@@ -153,17 +156,16 @@ class Potential
                                      std::vector<double> const& rho_core);
 
 
-        double xc_mt_PAW_collinear(std::vector<Spheric_function<spectral, double>>& potential,
-                                   std::vector<Spheric_function<spectral, double>> const& density,
-                                   std::vector<double> const& rho_core);
+//        double xc_mt_PAW_collinear(std::vector<Spheric_function<spectral, double>>& potential,
+//                                   std::vector<Spheric_function<spatial, double>> const& density,
+//                                   std::vector<double> const& rho_core);
 
-        double xc_mt_PAW_noncollinear(std::vector<Spheric_function<spectral, double>>& potential,
-                                      std::vector<Spheric_function<spectral, double>> const& density,
-                                      std::vector<double> const& rho_core);
+        std::vector<Spheric_function<spatial, double>> xc_mt_PAW_noncollinear(std::vector<Spheric_function<spatial, double>> const& density,
+                                                                              std::vector<double> const& rho_core,
+                                                                              double& out_energy);
 
-        void calc_PAW_local_potential(paw_potential_data_t &pdd,
-                                      std::vector<Spheric_function<spectral, double>> const& ae_density,
-                                      std::vector<Spheric_function<spectral, double>> const& ps_density);
+        void calc_PAW_local_potential(paw_potential_data_t& ppd,
+                                      paw_density_data_t const& pdd);
 
         void calc_PAW_local_Dij(paw_potential_data_t &pdd, mdarray<double, 4>& paw_dij);
 

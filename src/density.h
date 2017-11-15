@@ -64,6 +64,26 @@ extern "C" void update_density_rg_2_gpu(int size__,
 
 namespace sirius {
 
+struct paw_density_data_t
+{
+    Atom *atom_{nullptr};
+
+    int ia{-1};
+
+    /// ae and ps local unified densities+magnetization
+    std::vector<Spheric_function<spectral, double>> ae_density_;
+    std::vector<Spheric_function<spectral, double>> ps_density_;
+
+    std::vector<Spheric_function<spatial, double>> ae_density_tp_;
+    std::vector<Spheric_function<spatial, double>> ps_density_tp_;
+
+    /// density from relativistic small component
+    std::vector<Spheric_function<spectral, double>> ae_rel_small_density_;
+
+    /// contribution to magnetization is calculated on a spatial grid
+    std::array<Spheric_function<spatial, double>, 3> ae_rel_small_magn_comp_tp_;
+};
+
 /// Generate charge density and magnetization from occupied spinor wave-functions.
 /** Let's start from the definition of the complex density matrix:
  *  \f[
@@ -152,22 +172,7 @@ class Density
         /// Density matrix for all atoms.
         mdarray<double_complex, 4> density_matrix_; // TODO: make it local for LAPW
 
-        struct paw_density_data_t
-        {
-            Atom *atom_{nullptr};
 
-            int ia{-1};
-
-            /// ae and ps local unified densities+magnetization
-            std::vector<Spheric_function<spectral, double>> ae_density_;
-            std::vector<Spheric_function<spectral, double>> ps_density_;
-
-            /// density from relativistic small component
-            std::vector<Spheric_function<spectral, double>> ae_rel_small_density_;
-
-            /// contribution to magnetization is calculated on a spatial grid
-            std::array<Spheric_function<spatial, double>, 3> ae_rel_small_magn_comp_;
-        };
 
         std::vector<paw_density_data_t> paw_density_data_;
 
@@ -813,6 +818,11 @@ class Density
 
         /// Generate \f$ n_1 \f$  and \f$ \tilde{n}_1 \f$ in lm components.
         void generate_paw_loc_density();
+
+        paw_density_data_t const& paw_density_data(int spl_paw_ind) const
+        {
+            return paw_density_data_[spl_paw_ind];
+        }
 
         std::vector<Spheric_function<spectral, double>> const& ae_paw_atom_density(int spl_paw_ind) const
         {

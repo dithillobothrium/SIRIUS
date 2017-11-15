@@ -32,16 +32,18 @@ inline void Density::init_paw()
         for (int i = 0; i < ctx_.num_mag_dims() + 1; i++) {
             pdd.ae_density_.push_back(Spheric_function<spectral, double>(lm_max_rho, pdd.atom_->radial_grid()));
             pdd.ps_density_.push_back(Spheric_function<spectral, double>(lm_max_rho, pdd.atom_->radial_grid()));
-        }
 
-        if (atom.type().pp_desc().spin_orbit_coupling) {
-            /* 4 components for small density */
-            for (int i = 0; i < ctx_.num_mag_dims() + 1; i++) {
+            pdd.ae_density_tp_.push_back(Spheric_function<spatial, double>(sht_->num_points(), pdd.atom_->radial_grid()));
+            pdd.ps_density_tp_.push_back(Spheric_function<spatial, double>(sht_->num_points(), pdd.atom_->radial_grid()));
+
+            /* Spin-Orbit */
+            if (atom.type().pp_desc().spin_orbit_coupling) {
+                /* add 4-comp density from small component*/
                 pdd.ae_rel_small_density_.push_back(Spheric_function<spectral, double>(lm_max_rho, pdd.atom_->radial_grid()));
-            }
-            /* 3 components for magnetization part in spatial view (1,2,3 component of density array) */
-            for (int i = 0; i < ctx_.num_mag_dims() ; i++) {
-                ae_rel_small_magn_comp_[i] = Spheric_function<sht_->num_points(), double>(lm_max_rho, pdd.atom_->radial_grid());
+                /* add 3-comp magnetization */
+                if (i > 0) {
+                    pdd.ae_rel_small_magn_comp_tp_[i-1] = Spheric_function<spatial, double>(sht_->num_points(), pdd.atom_->radial_grid());
+                }
             }
         }
 
@@ -96,14 +98,7 @@ inline void Density::init_density_matrix_for_paw()
     }
 }
 
-
-inline void Density::add_rel_small_magnetization()
-{
-
-}
-
-
-inline void Density::generate_paw_atom_density(paw_density_data_t &pdd)
+inline void Density::generate_paw_atom_density(paw_density_data_t& pdd)
 {
     int ia = pdd.ia;
 
@@ -122,8 +117,12 @@ inline void Density::generate_paw_atom_density(paw_density_data_t &pdd)
         pdd.ae_density_[i].zero();
         pdd.ps_density_[i].zero();
 
-        if (atom.type().pp_desc().spin_orbit_coupling) {
+        /* Spin-Orbit */
+        if (atom_type.pp_desc().spin_orbit_coupling) {
             pdd.ae_rel_small_density_[i].zero();
+            if (i > 0) {
+                pdd.ae_rel_small_magn_comp_tp_[i-1].zero();
+            }
         }
     }
 
@@ -173,25 +172,22 @@ inline void Density::generate_paw_atom_density(paw_density_data_t &pdd)
                 }
             }
 
-            /* add nonzero coefficients */
-            for(int inz = 0; inz < num_non_zero_gk; inz++){
-                auto& lm3coef = GC.gaunt(lm1,lm2,inz);
-
-
+            for (int imagn = 0; imagn < ctx_.num_mag_dims() + 1; imagn++) {
+                /* add nonzero coefficients */
+                for(int inz = 0; inz < num_non_zero_gk; inz++){
+                    auto& lm3coef = GC.gaunt(lm1,lm2,inz);
                     /* iterate over radial points */
                     for(int irad = 0; irad < (int)grid.num_points(); irad++){
-
                         /* we need to divide density over r^2 since wave functions are stored multiplied by r */
                         double prefac = dm[imagn] * diag_coef * grid.x_inv(irad) * grid.x_inv(irad) * lm3coef.coef;
-
                         /* calculate unified density/magnetization
                          * dm_ij * GauntCoef * ( phi_i phi_j  +  Q_ij) */
                         pdd.ae_density_[imagn](lm3coef.lm3, irad) += prefac * pp_desc.all_elec_wfc(irad,irb1) * pp_desc.all_elec_wfc(irad,irb2);
                         pdd.ps_density_[imagn](lm3coef.lm3, irad) += prefac * (pp_desc.pseudo_wfc(irad,irb1) * pp_desc.pseudo_wfc(irad,irb2) +
-                                                                pp_desc.q_radial_functions_l(irad,iqij,l_by_lm[lm3coef.lm3]));
+                                pp_desc.q_radial_functions_l(irad,iqij,l_by_lm[lm3coef.lm3]));
                     }
-                    /* in case of spin-orbit add small component to 4-component density*/
-                    if (atom.type().pp_desc().spin_orbit_coupling) {
+                    /* in case of spin-orbit add small component to 4-component density */
+                    if (atom_type.pp_desc().spin_orbit_coupling) {
                         /* iterate over radial points */
                         for(int irad = 0; irad < (int)grid.num_points(); irad++){
 
@@ -207,10 +203,30 @@ inline void Density::generate_paw_atom_density(paw_density_data_t &pdd)
         }
     }
 
-    /* in case of spin-orbit also need to add component to magnetization in spatial representation*/
-    if (atom.type().pp_desc().spin_orbit_coupling) {
-        for (int imagn = 0; imagn < ctx_.num_mag_dims() /* should be 3*/ ; imagn++) {
+    for (int imagn = 0; imagn < ctx_.num_mag_dims() + 1; imagn++) {
+        pdd.ae_density_tp_[imagn] = transform(sht_.get(), pdd.ae_density_[imagn]);
+        pdd.ps_density_tp_[imagn] = transform(sht_.get(), pdd.ps_density_[imagn]);
+    }
 
+    /* in case of spin-orbit also need to add component to magnetization in spatial representation*/
+    if (atom_type.pp_desc().spin_orbit_coupling) {
+        /* transform only magnetic field part to theta phi */
+        for (int imagn = 0; imagn < 3; imagn++) {
+            pdd.ae_rel_small_magn_comp_tp_[imagn] = transform(sht_.get(), pdd.ae_rel_small_density_[imagn + 1]);
+        }
+        /* over magnetic components */
+        for (int imagn = 0; imagn < 3 ; imagn++) {
+            /* over theta phi */
+            for (int itp = 0; itp < sht_->num_points(); itp++) {
+                /* Cartesian coords of the point */
+                auto coord = sht_->coord(itp);
+                /* over radial part */
+                for (int irad = 0; irad < (int)grid.num_points(); irad++) {
+                    for (int x: {0,1,2}) {
+                        pdd.ae_density_tp_[imagn + 1](itp, irad) -= 2.0 * pdd.ae_rel_small_magn_comp_tp_[x](itp, irad) * coord[x] * coord[imagn];
+                    }
+                }
+            }
         }
     }
 }
