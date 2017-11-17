@@ -80,9 +80,9 @@ class Simulation_context_base: public Simulation_parameters
 
         std::string start_time_tag_;
 
-        ev_solver_t std_evp_solver_type_{ev_lapack};
+        ev_solver_t std_evp_solver_type_{ev_solver_t::lapack};
 
-        ev_solver_t gen_evp_solver_type_{ev_lapack};
+        ev_solver_t gen_evp_solver_type_{ev_solver_t::lapack};
 
         mdarray<double_complex, 3> phase_factors_;
 
@@ -358,6 +358,18 @@ class Simulation_context_base: public Simulation_parameters
         inline ev_solver_t gen_evp_solver_type() const
         {
             return gen_evp_solver_type_;
+        }
+        
+        template <typename T>
+        inline std::unique_ptr<Eigensolver<T>> std_evp_solver()
+        {
+            return std::move(Eigensolver_factory<T>(std_evp_solver_type_));
+        }
+
+        template <typename T>
+        inline std::unique_ptr<Eigensolver<T>> gen_evp_solver()
+        {
+            return std::move(Eigensolver_factory<T>(gen_evp_solver_type_));
         }
 
         /// Phase factors \f$ e^{i {\bf G} {\bf r}_{\alpha}} \f$
@@ -734,16 +746,14 @@ inline void Simulation_context_base::initialize()
 
     ev_solver_t* evst[] = {&std_evp_solver_type_, &gen_evp_solver_type_};
 
-    std::map<std::string, ev_solver_t> str_to_ev_solver_t;
-
-    str_to_ev_solver_t["lapack"]    = ev_lapack;
-    str_to_ev_solver_t["scalapack"] = ev_scalapack;
-    str_to_ev_solver_t["elpa1"]     = ev_elpa1;
-    str_to_ev_solver_t["elpa2"]     = ev_elpa2;
-    str_to_ev_solver_t["magma"]     = ev_magma;
-    str_to_ev_solver_t["plasma"]    = ev_plasma;
-    str_to_ev_solver_t["rs_cpu"]    = ev_rs_cpu;
-    str_to_ev_solver_t["rs_gpu"]    = ev_rs_gpu;
+    std::map<std::string, ev_solver_t> str_to_ev_solver_t = {
+        {"lapack",    ev_solver_t::lapack},
+        {"scalapack", ev_solver_t::scalapack},
+        {"elpa1",     ev_solver_t::elpa1},
+        {"elpa2",     ev_solver_t::elpa2},
+        {"magma",     ev_solver_t::magma},
+        {"plasma",    ev_solver_t::plasma}
+    };
 
     for (int i: {0, 1}) {
         auto name = evsn[i];
@@ -924,37 +934,37 @@ inline void Simulation_context_base::print_info()
     for (int i = 0; i < 2; i++) {
         printf("%s", evsn[i].c_str());
         switch (evst[i]) {
-            case ev_lapack: {
+            case ev_solver_t::lapack: {
                 printf("LAPACK\n");
                 break;
             }
             #ifdef __SCALAPACK
-            case ev_scalapack: {
+            case ev_solver_t::scalapack: {
                 printf("ScaLAPACK\n");
                 break;
             }
-            case ev_elpa1: {
+            case ev_solver_t::elpa1: {
                 printf("ELPA1\n");
                 break;
             }
-            case ev_elpa2: {
+            case ev_solver_t::elpa2: {
                 printf("ELPA2\n");
                 break;
             }
-            case ev_rs_gpu: {
-                printf("RS_gpu\n");
-                break;
-            }
-            case ev_rs_cpu: {
-                printf("RS_cpu\n");
-                break;
-            }
+            //case ev_rs_gpu: {
+            //    printf("RS_gpu\n");
+            //    break;
+            //}
+            //case ev_rs_cpu: {
+            //    printf("RS_cpu\n");
+            //    break;
+            //}
             #endif
-            case ev_magma: {
+            case ev_solver_t::magma: {
                 printf("MAGMA\n");
                 break;
             }
-            case ev_plasma: {
+            case ev_solver_t::plasma: {
                 printf("PLASMA\n");
                 break;
             }
