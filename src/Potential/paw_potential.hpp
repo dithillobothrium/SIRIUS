@@ -285,7 +285,7 @@ Potential::xc_mt_PAW_noncollinear(std::vector<Spheric_function<spatial, double>>
     /* collinear case */
     if (ctx_.num_mag_dims() == 1) {
         vxc_tp.push_back(0.5 * (vxc_u_tp + vxc_d_tp));
-        vxc_tp.push_back(0.5 * (vxc_u_tp + vxc_d_tp));
+        vxc_tp.push_back(0.5 * (vxc_u_tp - vxc_d_tp));
     }
 
     /* non-collinear case */

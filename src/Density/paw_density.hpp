@@ -237,7 +237,7 @@ inline void Density::generate_paw_loc_density()
         return;
     }
 
-    PROFILE("sirius::Potential::generate_PAW_effective_potential");
+    PROFILE("sirius::Density::generate_paw_loc_density");
 
     #pragma omp parallel for
     for (int i = 0; i < unit_cell_.spl_num_paw_atoms().local_size(); i++) {
