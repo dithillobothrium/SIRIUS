@@ -73,7 +73,7 @@ inline void Potential::generate_PAW_effective_potential(Density const& density)
     /* zero Dij */
     paw_dij_.zero();
 
-    /* calculate xc and hartree for atoms */
+    /* calculate xc and hartree for atoms without OpenMP since it is used inside*/
     for(int i = 0; i < unit_cell_.spl_num_paw_atoms().local_size(); i++) {
         calc_PAW_local_potential(paw_potential_data_[i],
                                  density.ae_paw_atom_density(i),
@@ -332,20 +332,24 @@ inline double Potential::calc_PAW_hartree_potential(Atom& atom,
     //---------------------
     auto l_by_lm = Utils::l_by_lm( Utils::lmax_by_lmmax(lmsize_rho) );
 
-    // create array for integration
-    std::vector<double> intdata(grid.num_points(),0);
-
     double hartree_energy=0.0;
 
-    for (int lm=0; lm < lmsize_rho; lm++){
-        // fill data to integrate
-        for (int irad = 0; irad < grid.num_points(); irad++){
-            intdata[irad] = full_density(lm,irad) * full_potential(lm, irad) * grid[irad] * grid[irad];
-        }
+    #pragma omp parallel reduction(+:hartree_energy)
+    {
+        /* create array for integration */
+        std::vector<double> intdata(grid.num_points(),0);
 
-        // create spline from the data
-        Spline<double> h_spl(grid,intdata);
-        hartree_energy += 0.5 * h_spl.integrate(0);
+        #pragma omp for
+        for (int lm=0; lm < lmsize_rho; lm++){
+            /* fill data to integrate */
+            for (int irad = 0; irad < grid.num_points(); irad++){
+                intdata[irad] = full_density(lm,irad) * full_potential(lm, irad) * grid[irad] * grid[irad];
+            }
+
+            /* create spline from the data */
+            Spline<double> h_spl(grid,intdata);
+            hartree_energy += 0.5 * h_spl.integrate(0);
+        }
     }
 
     return hartree_energy;
