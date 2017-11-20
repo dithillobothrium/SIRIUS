@@ -79,9 +79,6 @@ struct paw_density_data_t
 
     /// density from relativistic small component
     std::vector<Spheric_function<spectral, double>> ae_rel_small_density_;
-
-    /// contribution to magnetization is calculated on a spatial grid
-    std::array<Spheric_function<spatial, double>, 3> ae_rel_small_magn_comp_tp_;
 };
 
 /// Generate charge density and magnetization from occupied spinor wave-functions.

@@ -136,12 +136,21 @@ struct pseudopotential_descriptor
     /// All electron basis wave functions, have the same dimensionality as uspp.beta_radial_functions.
     mdarray<double, 2> all_elec_wfc;
 
+    /// stores all electron phi(i) * phi(j)
+    mdarray<double, 2> all_elec_wfc_matrix;
+
     /// pseudo basis wave functions, have the same dimensionality as uspp.beta_radial_functions
     mdarray<double, 2> pseudo_wfc;
+
+    /// stores pseudo phi(i) * phi(j)
+    mdarray<double, 2> pseudo_wfc_matrix;
 
     /// small component of relativistic All electron wave functions, have the same dimensionality as uspp.beta_radial_functions
     /// needed only if we have spin-orbit
     mdarray<double, 2> all_elec_rel_small_wfc;
+
+    /// stores relativistic small phi(i) * phi(j)
+    mdarray<double, 2> all_elec_rel_small_wfc_matrix;
 
     /// Core energy of PAW.
     double core_energy; // TODO: proper desciption comment

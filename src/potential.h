@@ -125,7 +125,7 @@ class Potential
             std::vector<Spheric_function<spectral, double>> ps_potential_;
 
             /* used in case of spin orbit */
-            std::vector<Spheric_function<spectral, double>> g_function_;
+            std::array<Spheric_function<spectral, double>, 3> g_function_;
 
             double hartree_energy_{0.0};
             double xc_energy_{0.0};
@@ -177,6 +177,7 @@ class Potential
                                         const mdarray<double_complex, 4>& density_matrix,
                                         const mdarray<double, 4>& paw_dij);
 
+        std::array<Spheric_function<spectral, double>, 3> calc_g_function(std::vector<Spheric_function<spatial, double>> const& ae_potential_tp);
 
         void add_paw_Dij_to_atom_Dmtrx();
         

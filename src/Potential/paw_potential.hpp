@@ -33,6 +33,10 @@ inline void Potential::init_PAW()
         for (int i = 0; i < ctx_.num_mag_dims() + 1; i++) {
             ppd.ae_potential_.push_back(Spheric_function<spectral, double>(lm_max_rho, ppd.atom_->radial_grid()));
             ppd.ps_potential_.push_back(Spheric_function<spectral, double>(lm_max_rho, ppd.atom_->radial_grid()));
+
+            if (atom_type.pp_desc().spin_orbit_coupling && i > 0) {
+                ppd.g_function_[i-1] = Spheric_function<spectral, double>(lm_max_rho, ppd.atom_->radial_grid());
+            }
         }
 
         ppd.core_energy_ = atom_type.pp_desc().core_energy;
@@ -342,9 +346,7 @@ inline double Potential::calc_PAW_hartree_potential(Atom& atom,
     /* add hartree contribution */
     full_potential += atom_pot_sf;
 
-    //---------------------
-    //--- calc energy ---
-    //---------------------
+    /* calc energy */
     auto l_by_lm = Utils::l_by_lm( Utils::lmax_by_lmmax(lmsize_rho) );
 
     double hartree_energy=0.0;
@@ -375,15 +377,11 @@ inline void Potential::calc_PAW_local_potential(paw_potential_data_t &ppd,
 {
     auto& pp_desc = ppd.atom_->type().pp_desc();
 
-    //-----------------------------------------
-    //---- Calculation of Hartree potential ---
-    //-----------------------------------------
-
+    /* Calculation of Hartree potential */
     for (int i = 0; i < ctx_.num_mag_dims() + 1; i++) {
         ppd.ae_potential_[i].zero();
         ppd.ps_potential_[i].zero();
     }
-
 
     double ae_hartree_energy = calc_PAW_hartree_potential(*ppd.atom_,
                                                           pdd.ae_density_[0],
@@ -395,9 +393,7 @@ inline void Potential::calc_PAW_local_potential(paw_potential_data_t &ppd,
 
     ppd.hartree_energy_ = ae_hartree_energy - ps_hartree_energy;
 
-    //-----------------------------------------
-    //---- Calculation of XC potential ---
-    //-----------------------------------------
+    /* Calculation of XC potential */
     double ae_xc_energy = 0.0;
     double ps_xc_energy = 0.0;
 
@@ -409,19 +405,20 @@ inline void Potential::calc_PAW_local_potential(paw_potential_data_t &ppd,
 
         case 1:
         case 3:{
-            /* receive potential in theta phi*/
-            auto ae_potential = xc_mt_PAW_noncollinear(pdd.ae_density_tp_, pp_desc.all_elec_core_charge, ae_xc_energy);
-            auto ps_potential = xc_mt_PAW_noncollinear(pdd.ps_density_tp_, pp_desc.core_charge_density,  ps_xc_energy);
+            /* receive potential in theta phi
+             * waiting for C++17 to rewrite this in better way */
+            auto ae_potential_tp = xc_mt_PAW_noncollinear(pdd.ae_density_tp_, pp_desc.all_elec_core_charge, ae_xc_energy);
+            auto ps_potential_tp = xc_mt_PAW_noncollinear(pdd.ps_density_tp_, pp_desc.core_charge_density,  ps_xc_energy);
 
             /* convert to lm */
             for (int i = 0; i < ctx_.num_mag_dims() + 1; i++) {
-                ppd.ae_potential_[i] += transform(sht_.get(), ae_potential[i]);
-                ppd.ps_potential_[i] += transform(sht_.get(), ps_potential[i]);
+                ppd.ae_potential_[i] += transform(sht_.get(), ae_potential_tp[i]);
+                ppd.ps_potential_[i] += transform(sht_.get(), ps_potential_tp[i]);
             }
 
             /* utilise AE potential in theta phi to compute G function from PRB 82, 075116 2010 */
-            if (ppd.atom_->type().pp_desc().spin_orbit_coupling) {
-
+            if (ppd.atom_->type().pp_desc().spin_orbit_coupling && ctx_.num_mag_dims() == 3) {
+                ppd.g_function_ = calc_g_function(ae_potential_tp);
             }
         }break;
 
@@ -433,6 +430,38 @@ inline void Potential::calc_PAW_local_potential(paw_potential_data_t &ppd,
     /* save xc energy in pdd structure */
     ppd.xc_energy_ = ae_xc_energy - ps_xc_energy;
 }
+
+
+std::array<Spheric_function<spectral, double>, 3> Potential::calc_g_function(std::vector<Spheric_function<spatial, double>> const& ae_potential_tp)
+{
+    if (ae_potential_tp.size() != 4) {
+        TERMINATE("Error in Potential::calc_g_function! potential should have 4 components");
+    }
+
+    std::array<Spheric_function<spectral, double>, 3> g_function;
+
+    auto& rgrid = ae_potential_tp[0].radial_grid();
+
+    /* over magnetic components */
+    for (int imagn = 0; imagn < 3 ; imagn++) {
+        Spheric_function<spatial, double> g_func_comp(sht_->num_points(), rgrid);
+        /* over theta phi */
+        for (int itp = 0; itp < sht_->num_points(); itp++) {
+            /* Cartesian coords of the point */
+            auto coord = sht_->coord(itp);
+            /* over radial part */
+            for (int x: {0,1,2}) {
+                for (int irad = 0; irad < (int)rgrid.num_points(); irad++) {
+                    g_func_comp(itp, irad) = - 2.0 * ae_potential_tp[x+1](itp, irad) * coord[x] * coord[imagn];
+                }
+            }
+        }
+        g_function[imagn] = transform(sht_.get(), sg_func_comp);
+    }
+
+    return g_function;
+}
+
 
 inline void Potential::calc_PAW_local_Dij(paw_potential_data_t &pdd, mdarray<double,4>& paw_dij)
 {
@@ -451,8 +480,7 @@ inline void Potential::calc_PAW_local_Dij(paw_potential_data_t &pdd, mdarray<dou
     Gaunt_coefficients<double> GC(lmax, 2 * lmax, lmax, SHT::gaunt_rlm);
 
     /* store integrals here */
-    mdarray<double, 3> integrals(lmsize_rho, pp_desc.num_beta_radial_functions * (pp_desc.num_beta_radial_functions + 1) / 2,
-                                 ctx_.num_mag_dims() + 1);
+    mdarray<double, 3> integrals(lmsize_rho, pp_desc.num_beta_radial_functions * (pp_desc.num_beta_radial_functions + 1) / 2, ctx_.num_mag_dims() + 1);
 
     for(int imagn = 0; imagn < ctx_.num_mag_dims() + 1; imagn++ ){
         auto &ae_atom_pot = pdd.ae_potential_[imagn];
@@ -476,10 +504,21 @@ inline void Potential::calc_PAW_local_Dij(paw_potential_data_t &pdd, mdarray<dou
                         intdata[irad] = ae_atom_pot(lm3,irad) * ae_part - ps_atom_pot(lm3,irad) * ps_part;
                     }
 
-                    // create spline from data arrays
+                    /* in case of spin-orbit we need to add small corrections*/
+                    if (ppd.atom_->type().pp_desc().spin_orbit_coupling) {
+                        for (int irad = 0; irad < newgrid.num_points(); irad++) {
+                            intdata[irad] += ae_atom_pot(lm3,irad) * pp_desc.all_elec_rel_small_wfc(irad,irb1) * pp_desc.all_elec_rel_small_wfc(irad,irb2);;
+                        }
+                        /* and if non-collinear spin-orbit add effective field contribution*/
+                        if (ctx_num_mag_dims == 3 && imagn > 0) {
+                            intdata[irad] -= pdd.g_function_(lm3,irad) * pp_desc.all_elec_rel_small_wfc(irad,irb1) * pp_desc.all_elec_rel_small_wfc(irad,irb2);
+                        }
+                    }
+
+                    /* create spline from data arrays */
                     Spline<double> dij_spl(newgrid,intdata);
 
-                    // integrate
+                    /* integrate */
                     integrals(lm3, iqij, imagn) = dij_spl.integrate(0);
                 }
 
@@ -510,7 +549,6 @@ inline void Potential::calc_PAW_local_Dij(paw_potential_data_t &pdd, mdarray<dou
                 /* add nonzero coefficients */
                 for (int inz = 0; inz < num_non_zero_gk; inz++) {
                     auto& lm3coef = GC.gaunt(lm1, lm2, inz);
-
                     /* add to atom Dij an integral of dij array */
                     paw_dij(ib1, ib2, imagn, paw_ind) += lm3coef.coef * integrals(lm3coef.lm3, iqij, imagn);
                 }
