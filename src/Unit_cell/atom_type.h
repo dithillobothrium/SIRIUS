@@ -1518,6 +1518,39 @@ inline void Atom_type::read_pseudo_paw(json const& parser)
             parse_wfc(parser["pseudo_potential"]["paw_data"]["ae_wfc_rel_small"][i]["radial_function"].get<std::vector<double>>(), &pp_desc_.all_elec_rel_small_wfc(0, i));
         }
     }
+
+    auto create_wfc_matrix = [&](mdarray<double, 2> const& wfc)
+    {
+        mdarray<double, 2> wfc_matrix(num_mt_points_, num_wfc * (num_wfc + 1) / 2);
+        wfc_matrix.zero();
+
+        /* store wave function pairs phi(i)*phi(j) */
+        #pragma omp parallel for
+        for (int irb2 = 0; irb2 < num_wfc; irb2++) {
+            for (int irb1 = 0; irb1 <= irb2; irb1++) {
+                /* idx to iterate triangular matrix part */
+                int iqij = irb2 * (irb2 + 1) / 2 + irb1;
+                for(int irad = 0; irad < pp_desc_.cutoff_radius_index; irad++){
+                    wfc_matrix(irad, iqij) = wfc(irad, irb1) * wfc(irad, irb2);
+                }
+            }
+        }
+
+        return wfc_matrix;
+    };
+
+    /* create wfc matrices */
+    pp_desc_.all_elec_wfc_matrix = create_wfc_matrix(pp_desc_.all_elec_wfc);
+    pp_desc_.pseudo_wfc_matrix = create_wfc_matrix(pp_desc_.pseudo_wfc);
+
+    /* in case of spin orbit create matrix for small component and add it ti all-electron matrix*/
+    if (pp_desc_.spin_orbit_coupling) {
+        pp_desc_.all_elec_rel_small_wfc_matrix = create_wfc_matrix(pp_desc_.all_elec_rel_small_wfc);
+        #pragma omp parallel for
+        for (int i = 0; i < (int)pp_desc_.all_elec_wfc_matrix.size(); i++) {
+            pp_desc_.all_elec_wfc_matrix[i] += pp_desc_.all_elec_rel_small_wfc_matrix[i];
+        }
+    }
 }
 
 inline void Atom_type::read_input(const std::string& fname)

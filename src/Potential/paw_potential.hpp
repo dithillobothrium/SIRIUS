@@ -456,18 +456,18 @@ std::array<Spheric_function<spectral, double>, 3> Potential::calc_g_function(std
                 }
             }
         }
-        g_function[imagn] = transform(sht_.get(), sg_func_comp);
+        g_function[imagn] = transform(sht_.get(), g_func_comp);
     }
 
     return g_function;
 }
 
 
-inline void Potential::calc_PAW_local_Dij(paw_potential_data_t &pdd, mdarray<double,4>& paw_dij)
+inline void Potential::calc_PAW_local_Dij(paw_potential_data_t &ppd, mdarray<double,4>& paw_dij)
 {
-    int paw_ind = pdd.ia_paw;
+    int paw_ind = ppd.ia_paw;
 
-    auto& atom_type = pdd.atom_->type();
+    auto& atom_type = ppd.atom_->type();
 
     auto& pp_desc = atom_type.pp_desc();
 
@@ -479,68 +479,62 @@ inline void Potential::calc_PAW_local_Dij(paw_potential_data_t &pdd, mdarray<dou
 
     Gaunt_coefficients<double> GC(lmax, 2 * lmax, lmax, SHT::gaunt_rlm);
 
+    int nrb = pp_desc.num_beta_radial_functions;
+
     /* store integrals here */
-    mdarray<double, 3> integrals(lmsize_rho, pp_desc.num_beta_radial_functions * (pp_desc.num_beta_radial_functions + 1) / 2, ctx_.num_mag_dims() + 1);
+    mdarray<double, 3> integrals(lmsize_rho, nrb * (nrb + 1) / 2, ctx_.num_mag_dims() + 1);
 
+    /* shorter paw radial grid*/
+    // TODO use shorter paw grid everywhere
+    Radial_grid<double> newgrid = atom_type.radial_grid().segment(pp_desc.cutoff_radius_index);
+
+    /* create array for integration */
+    std::vector<double> intdata(newgrid.num_points(),0);
+
+    /* integrate */
     for(int imagn = 0; imagn < ctx_.num_mag_dims() + 1; imagn++ ){
-        auto &ae_atom_pot = pdd.ae_potential_[imagn];
-        auto &ps_atom_pot = pdd.ps_potential_[imagn];
+        auto &ae_atom_pot = ppd.ae_potential_[imagn];
+        auto &ps_atom_pot = ppd.ps_potential_[imagn];
 
-        for (int irb2 = 0; irb2 < pp_desc.num_beta_radial_functions; irb2++){
-            for (int irb1 = 0; irb1 <= irb2; irb1++){
-                int iqij = (irb2 * (irb2 + 1)) / 2 + irb1;
-
-                Radial_grid<double> newgrid = atom_type.radial_grid().segment(pp_desc.cutoff_radius_index);
-
-                // create array for integration
-                std::vector<double> intdata(newgrid.num_points(),0);
-
-                for (int lm3 = 0; lm3 < lmsize_rho; lm3++) {
-                    // fill array
-                    for (int irad = 0; irad < newgrid.num_points(); irad++) {
-                        double ae_part = pp_desc.all_elec_wfc(irad,irb1) * pp_desc.all_elec_wfc(irad,irb2);
-                        double ps_part = pp_desc.pseudo_wfc(irad,irb1) * pp_desc.pseudo_wfc(irad,irb2)  + pp_desc.q_radial_functions_l(irad,iqij,l_by_lm[lm3]);
-
-                        intdata[irad] = ae_atom_pot(lm3,irad) * ae_part - ps_atom_pot(lm3,irad) * ps_part;
-                    }
-
-                    /* in case of spin-orbit we need to add small corrections*/
-                    if (ppd.atom_->type().pp_desc().spin_orbit_coupling) {
-                        for (int irad = 0; irad < newgrid.num_points(); irad++) {
-                            intdata[irad] += ae_atom_pot(lm3,irad) * pp_desc.all_elec_rel_small_wfc(irad,irb1) * pp_desc.all_elec_rel_small_wfc(irad,irb2);;
-                        }
-                        /* and if non-collinear spin-orbit add effective field contribution*/
-                        if (ctx_num_mag_dims == 3 && imagn > 0) {
-                            intdata[irad] -= pdd.g_function_(lm3,irad) * pp_desc.all_elec_rel_small_wfc(irad,irb1) * pp_desc.all_elec_rel_small_wfc(irad,irb2);
-                        }
-                    }
-
-                    /* create spline from data arrays */
-                    Spline<double> dij_spl(newgrid,intdata);
-
-                    /* integrate */
-                    integrals(lm3, iqij, imagn) = dij_spl.integrate(0);
+        for (int iqij = 0; iqij < nrb * (nrb + 1) / 2 ; iqij++) {
+            for (int lm3 = 0; lm3 < lmsize_rho; lm3++) {
+                /* fill array for integration */
+                for (int irad = 0; irad < newgrid.num_points(); irad++) {
+                    double ae_part = pp_desc.all_elec_wfc_matrix(irad, iqij);
+                    double ps_part = pp_desc.pseudo_wfc_matrix(irad, iqij)  + pp_desc.q_radial_functions_l(irad,iqij, l_by_lm[lm3]);
+                    intdata[irad] = ae_atom_pot(lm3, irad) * ae_part - ps_atom_pot(lm3, irad) * ps_part;
                 }
 
+                /* in case of spin-orbit we need to add small correction to magnetic field if we have non-collinear case*/
+                if (ppd.atom_->type().pp_desc().spin_orbit_coupling && ctx_.num_mag_dims() == 3 && imagn > 0) {
+                    for (int irad = 0; irad < newgrid.num_points(); irad++) {
+                        intdata[irad] -= ppd.g_function_[imagn - 1](lm3, irad) * pp_desc.all_elec_rel_small_wfc_matrix(irad, iqij);
+                    }
+                }
+
+                /* create spline from data arrays */
+                Spline<double> dij_spl(newgrid,intdata);
+
+                /* integrate */
+                integrals(lm3, iqij, imagn) = dij_spl.integrate(0);
             }
         }
     }
 
+
     //---- calc Dij ----
     for (int ib2 = 0; ib2 < atom_type.mt_lo_basis_size(); ib2++) {
         for (int ib1 = 0; ib1 <= ib2; ib1++) {
-            //int idij = (ib2 * (ib2 + 1)) / 2 + ib1;
-
-            // get lm quantum numbers (lm index) of the basis functions
+            /* get lm quantum numbers (lm index) of the basis functions */
             int lm1 = atom_type.indexb(ib1).lm;
             int lm2 = atom_type.indexb(ib2).lm;
 
-            //get radial basis functions indices
+            /* get radial basis functions indices */
             int irb1 = atom_type.indexb(ib1).idxrf;
             int irb2 = atom_type.indexb(ib2).idxrf;
 
             // common index
-            int iqij = (irb2 * (irb2 + 1)) / 2 + irb1;
+            int iqij = irb2 * (irb2 + 1) / 2 + irb1;
 
             // get num of non-zero GC
             int num_non_zero_gk = GC.num_gaunt(lm1,lm2);

@@ -175,20 +175,16 @@ inline void Density::generate_paw_atom_density(paw_density_data_t& pdd)
                         double prefac = dm[imagn] * diag_coef * grid.x_inv(irad) * grid.x_inv(irad) * lm3coef.coef;
                         /* calculate unified density/magnetization
                          * dm_ij * GauntCoef * ( phi_i phi_j  +  Q_ij) */
-                        pdd.ae_density_[imagn](lm3coef.lm3, irad) += prefac * pp_desc.all_elec_wfc(irad,irb1) * pp_desc.all_elec_wfc(irad,irb2);
-                        pdd.ps_density_[imagn](lm3coef.lm3, irad) += prefac * (pp_desc.pseudo_wfc(irad,irb1) * pp_desc.pseudo_wfc(irad,irb2) +
-                                pp_desc.q_radial_functions_l(irad,iqij,l_by_lm[lm3coef.lm3]));
+                        pdd.ae_density_[imagn](lm3coef.lm3, irad) += prefac * pp_desc.all_elec_wfc_matrix(irad, iqij);
+                        pdd.ps_density_[imagn](lm3coef.lm3, irad) += prefac * (pp_desc.pseudo_wfc_matrix(irad, iqij) +
+                                pp_desc.q_radial_functions_l(irad, iqij, l_by_lm[lm3coef.lm3]));
                     }
                     /* in case of spin-orbit add small component to 4-component density */
                     if (atom_type.pp_desc().spin_orbit_coupling) {
                         /* iterate over radial points */
                         for(int irad = 0; irad < (int)grid.num_points(); irad++){
-
-                            double dens = dm[imagn] * diag_coef * grid.x_inv(irad) * grid.x_inv(irad) * lm3coef.coef *
-                                    pp_desc.all_elec_rel_small_wfc(irad,irb1) * pp_desc.all_elec_rel_small_wfc(irad,irb2);
-
-                            pdd.ae_density_[imagn](lm3coef.lm3, irad) += dens;
-                            pdd.ae_rel_small_density_[imagn](lm3coef.lm3, irad) += dens;
+                            pdd.ae_rel_small_density_[imagn](lm3coef.lm3, irad) += dm[imagn] * diag_coef * grid.x_inv(irad) * grid.x_inv(irad) *
+                                    lm3coef.coef * pp_desc.all_elec_rel_small_wfc_matrix(irad, iqij);
                         }
                     }
                 }
@@ -204,12 +200,9 @@ inline void Density::generate_paw_atom_density(paw_density_data_t& pdd)
     /* in case of spin-orbit if we have 3 spin components, we also need to add component to magnetization in spatial representation */
     /* lm representation will be used only in non-magnetic case */
     if (atom_type.pp_desc().spin_orbit_coupling && ctx_.num_mag_dims() == 3) {
-        /* temp store */
-        std::array<Spheric_function<spatial, double>, 3> ae_rel_small_magn_comp_tp;
-        /* transform only magnetic field part to theta phi */
-        auto ae_rel_small_magn_comp_tp = transform(sht_.get(), pdd.ae_rel_small_density_[imagn + 1]);
         /* over magnetic components */
         for (int imagn = 0; imagn < 3 ; imagn++) {
+            auto ae_rel_small_magn_comp_tp = transform(sht_.get(), pdd.ae_rel_small_density_[imagn + 1]);
             /* over theta phi */
             for (int itp = 0; itp < sht_->num_points(); itp++) {
                 /* Cartesian coords of the point */
