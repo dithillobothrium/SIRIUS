@@ -134,6 +134,20 @@ class dmatrix : public matrix<T>
         init();
     }
 
+    dmatrix(T* ptr__,
+            int num_rows__,
+            int num_cols__)
+        : matrix<T>(ptr__, num_rows__, num_cols__)
+        , num_rows_(num_rows__)
+        , num_cols_(num_cols__)
+        , bs_row_(1)
+        , bs_col_(1)
+        , spl_row_(num_rows_, 1, 0, bs_row_)
+        , spl_col_(num_cols_, 1, 0, bs_col_)
+    {
+        init();
+    }
+
     dmatrix(dmatrix<T>&& src) = default;
 
     dmatrix<T>& operator=(dmatrix<T>&& src) = default;
@@ -235,7 +249,8 @@ class dmatrix : public matrix<T>
                 auto c = spl_col_.location(i);
                 if (blacs_grid_->rank_col() == c.rank) {
                     T v = (*this)(r.local_index, c.local_index);
-                    (*this)(r.local_index, c.local_index) = sddk_type_wrapper<T>::real(v);
+                    //(*this)(r.local_index, c.local_index) = sddk_type_wrapper<T>::real(v);
+                    (*this)(r.local_index, c.local_index) = std::real(v);
                 }
             }
         }
