@@ -7,7 +7,7 @@
 #include "k_point.h"
 #include "wave_functions.hpp"
 #include "non_local_operator.h"
-#include "radial_integrals.h"
+#include "Radial_integrals/radial_integrals.h"
 #include "mixer.h"
 
 namespace sirius {
