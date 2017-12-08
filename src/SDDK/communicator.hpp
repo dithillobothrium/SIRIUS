@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 Anton Kozhevnikov, Thomas Schulthess
+// Copyright (c) 2013-2017 Anton Kozhevnikov, Thomas Schulthess
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are permitted provided that
@@ -29,16 +29,19 @@
 #include <cassert>
 #include <vector>
 #include <complex>
+#ifdef __GPU
+#include <GPU/cuda.hpp>
+#endif
 
 namespace sddk {
 
-#define CALL_MPI(func__, args__)                                                    \
-{                                                                                   \
-    if (func__ args__ != MPI_SUCCESS) {                                             \
-        printf("error in %s at line %i of file %s\n", #func__, __LINE__, __FILE__); \
-        MPI_Abort(MPI_COMM_WORLD, -1);                                              \
-    }                                                                               \
-}
+#define CALL_MPI(func__, args__)                                                                                       \
+    {                                                                                                                  \
+        if (func__ args__ != MPI_SUCCESS) {                                                                            \
+            printf("error in %s at line %i of file %s\n", #func__, __LINE__, __FILE__);                                \
+            MPI_Abort(MPI_COMM_WORLD, -1);                                                                             \
+        }                                                                                                              \
+    }
 
 enum class mpi_op_t
 {
@@ -164,6 +167,11 @@ struct block_data_descriptor
             offsets[i] = offsets[i - 1] + counts[i - 1];
         }
     }
+
+    inline int size() const
+    {
+        return counts.back() + offsets.back();
+    }
 };
 
 // TODO: proper way of controlling who owns comm and who needs to free it
@@ -175,18 +183,17 @@ class Communicator
     /// Raw MPI communicator.
     MPI_Comm mpi_comm_{MPI_COMM_NULL};
     /// True if this class instance is responsible for freeing raw MPI communicator.
-    bool need_to_free_;
+    bool need_to_free_{true};
     /* copy is not allowed */
     Communicator(Communicator const& src__) = delete;
     /* assigment is not allowed */
     Communicator operator=(Communicator const& src__) = delete;
-    
+
     /// Free communicator.
     void free()
     {
-        if (need_to_free_ && !(mpi_comm_ == MPI_COMM_NULL  ||
-                               mpi_comm_ == MPI_COMM_WORLD ||
-                               mpi_comm_ == MPI_COMM_SELF)) {
+        if (!(mpi_comm_ == MPI_COMM_NULL || mpi_comm_ == MPI_COMM_WORLD || mpi_comm_ == MPI_COMM_SELF) &&
+            need_to_free_) {
             CALL_MPI(MPI_Comm_free, (&mpi_comm_));
             mpi_comm_ = MPI_COMM_NULL;
         }
@@ -195,10 +202,9 @@ class Communicator
   public:
     /// Default constructor.
     Communicator()
-        : need_to_free_(true)
     {
     }
-    
+
     /// Constructor for existing communicator.
     Communicator(MPI_Comm mpi_comm__)
         : mpi_comm_(mpi_comm__)
@@ -211,12 +217,12 @@ class Communicator
     {
         free();
     }
-    
+
     /// Move constructor.
     Communicator(Communicator&& src__)
     {
         this->free();
-        this->mpi_comm_ = src__.mpi_comm_;
+        this->mpi_comm_     = src__.mpi_comm_;
         this->need_to_free_ = src__.need_to_free_;
         src__.need_to_free_ = false;
     }
@@ -225,7 +231,7 @@ class Communicator
     Communicator& operator=(Communicator&& src__)
     {
         this->free();
-        this->mpi_comm_ = src__.mpi_comm_;
+        this->mpi_comm_     = src__.mpi_comm_;
         this->need_to_free_ = src__.need_to_free_;
         src__.need_to_free_ = false;
         return *this;
@@ -234,22 +240,25 @@ class Communicator
     /// MPI initialization.
     static void initialize()
     {
+        int required = MPI_THREAD_MULTIPLE;
         int provided;
 
-        MPI_Init_thread(NULL, NULL, MPI_THREAD_FUNNELED, &provided);
+        // MPI_Init_thread(NULL, NULL, MPI_THREAD_FUNNELED, &provided);
+        MPI_Init_thread(NULL, NULL, required, &provided);
 
         MPI_Query_thread(&provided);
-        if (provided < MPI_THREAD_FUNNELED) {
-            printf("Warning! MPI_THREAD_FUNNELED level of thread support is not provided.\n");
+        if (provided < required) {
+            // printf("Warning! MPI_THREAD_FUNNELED level of thread support is not provided.\n");
+            printf("Warning! MPI_THREAD_MULTIPLE level of thread support is not provided.\n");
         }
     }
-    
+
     /// MPI shut down.
     static void finalize()
     {
         MPI_Finalize();
     }
-    
+
     /// Return reference to raw MPI communicator.
     inline MPI_Comm& mpi_comm()
     {
@@ -261,7 +270,7 @@ class Communicator
     {
         return mpi_comm_;
     }
-    
+
     /// Rank of MPI process inside communicator.
     inline int rank() const
     {
@@ -271,7 +280,7 @@ class Communicator
         CALL_MPI(MPI_Comm_rank, (mpi_comm_, &r));
         return r;
     }
-    
+
     /// Rank of MPI process inside communicator with associated Cartesian partitioning.
     inline int cart_rank(std::vector<int> const& coords__) const
     {
@@ -295,8 +304,14 @@ class Communicator
 
     inline void barrier() const
     {
+#if defined(__GPU_NVTX_MPI)
+        acc::begin_range_marker("MPI_Barrier");
+#endif
         assert(mpi_comm_ != MPI_COMM_NULL);
         CALL_MPI(MPI_Barrier, (mpi_comm_));
+#if defined(__GPU_NVTX_MPI)
+        acc::end_range_marker();
+#endif
     }
 
     template <typename T, mpi_op_t mpi_op__ = mpi_op_t::sum>
@@ -355,15 +370,27 @@ class Communicator
     template <typename T, mpi_op_t mpi_op__ = mpi_op_t::sum>
     inline void iallreduce(T* buffer__, int count__, MPI_Request* req__) const
     {
+#if defined(__GPU_NVTX_MPI)
+        acc::begin_range_marker("MPI_Iallreduce");
+#endif
         CALL_MPI(MPI_Iallreduce, (MPI_IN_PLACE, buffer__, count__, mpi_type_wrapper<T>::kind(),
                                   mpi_op_wrapper<mpi_op__>::kind(), mpi_comm_, req__));
+#if defined(__GPU_NVTX_MPI)
+        acc::end_range_marker();
+#endif
     }
 
     /// Perform buffer broadcast.
     template <typename T>
     inline void bcast(T* buffer__, int count__, int root__) const
     {
+#if defined(__GPU_NVTX_MPI)
+        acc::begin_range_marker("MPI_Bcast");
+#endif
         CALL_MPI(MPI_Bcast, (buffer__, count__, mpi_type_wrapper<T>::kind(), root__, mpi_comm_));
+#if defined(__GPU_NVTX_MPI)
+        acc::end_range_marker();
+#endif
     }
 
     inline void bcast(std::string& str__, int root__) const
@@ -381,22 +408,34 @@ class Communicator
         str__ = std::string(buf);
         delete[] buf;
     }
-    
+
     /// In-place MPI_Allgatherv.
     template <typename T>
     void allgather(T* buffer__, int const* recvcounts__, int const* displs__) const
     {
+#if defined(__GPU_NVTX_MPI)
+        acc::begin_range_marker("MPI_Allgatherv");
+#endif
         CALL_MPI(MPI_Allgatherv, (MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, buffer__, recvcounts__, displs__,
                                   mpi_type_wrapper<T>::kind(), mpi_comm_));
+#if defined(__GPU_NVTX_MPI)
+        acc::end_range_marker();
+#endif
     }
 
     /// Out-of-place MPI_Allgatherv.
     template <typename T>
-    void allgather(T* const sendbuf__, int sendcount__, T* recvbuf__, int const* recvcounts__,
-                   int const* displs__) const
+    void
+    allgather(T* const sendbuf__, int sendcount__, T* recvbuf__, int const* recvcounts__, int const* displs__) const
     {
+#if defined(__GPU_NVTX_MPI)
+        acc::begin_range_marker("MPI_Allgatherv");
+#endif
         CALL_MPI(MPI_Allgatherv, (sendbuf__, sendcount__, mpi_type_wrapper<T>::kind(), recvbuf__, recvcounts__,
                                   displs__, mpi_type_wrapper<T>::kind(), mpi_comm_));
+#if defined(__GPU_NVTX_MPI)
+        acc::end_range_marker();
+#endif
     }
 
     template <typename T>
@@ -406,7 +445,8 @@ class Communicator
         v[2 * rank()]     = count__;
         v[2 * rank() + 1] = offset__;
 
-        CALL_MPI(MPI_Allgather, (MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, v.data(), 2, mpi_type_wrapper<int>::kind(), mpi_comm_));
+        CALL_MPI(MPI_Allgather,
+                 (MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, v.data(), 2, mpi_type_wrapper<int>::kind(), mpi_comm_));
 
         std::vector<int> counts(size());
         std::vector<int> offsets(size());
@@ -416,10 +456,10 @@ class Communicator
             offsets[i] = v[2 * i + 1];
         }
 
-        //allgather(sendbuf__, count__, recvbuf__, counts.data(), offsets.data());
+        // allgather(sendbuf__, count__, recvbuf__, counts.data(), offsets.data());
 
-        CALL_MPI(MPI_Allgatherv, (sendbuf__, count__, mpi_type_wrapper<T>::kind(), recvbuf__, counts.data(), offsets.data(),
-                                  mpi_type_wrapper<T>::kind(), mpi_comm_));
+        CALL_MPI(MPI_Allgatherv, (sendbuf__, count__, mpi_type_wrapper<T>::kind(), recvbuf__, counts.data(),
+                                  offsets.data(), mpi_type_wrapper<T>::kind(), mpi_comm_));
     }
 
     /// In-place MPI_Allgatherv.
@@ -430,7 +470,8 @@ class Communicator
         v[2 * rank()]     = count__;
         v[2 * rank() + 1] = offset__;
 
-        CALL_MPI(MPI_Allgather, (MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, v.data(), 2, mpi_type_wrapper<int>::kind(), mpi_comm_));
+        CALL_MPI(MPI_Allgather,
+                 (MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, v.data(), 2, mpi_type_wrapper<int>::kind(), mpi_comm_));
 
         std::vector<int> counts(size());
         std::vector<int> offsets(size());
@@ -447,19 +488,38 @@ class Communicator
     {
         MPI_Request request;
 
+#if defined(__GPU_NVTX_MPI)
+        acc::begin_range_marker("MPI_Isend");
+#endif
         CALL_MPI(MPI_Isend, (buffer__, count__, mpi_type_wrapper<T>::kind(), dest__, tag__, mpi_comm_, &request));
+#if defined(__GPU_NVTX_MPI)
+        acc::end_range_marker();
+#endif
     }
 
     template <typename T>
     void recv(T* buffer__, int count__, int source__, int tag__) const
     {
-        CALL_MPI(MPI_Recv, (buffer__, count__, mpi_type_wrapper<T>::kind(), source__, tag__, mpi_comm_, MPI_STATUS_IGNORE));
+#if defined(__GPU_NVTX_MPI)
+        acc::begin_range_marker("MPI_Recv");
+#endif
+        CALL_MPI(MPI_Recv,
+                 (buffer__, count__, mpi_type_wrapper<T>::kind(), source__, tag__, mpi_comm_, MPI_STATUS_IGNORE));
+#if defined(__GPU_NVTX_MPI)
+        acc::end_range_marker();
+#endif
     }
 
     template <typename T>
     void irecv(T* buffer__, int count__, int source__, int tag__, MPI_Request* request__) const
     {
+#if defined(__GPU_NVTX_MPI)
+        acc::begin_range_marker("MPI_Irecv");
+#endif
         CALL_MPI(MPI_Irecv, (buffer__, count__, mpi_type_wrapper<T>::kind(), source__, tag__, mpi_comm_, request__));
+#if defined(__GPU_NVTX_MPI)
+        acc::end_range_marker();
+#endif
     }
 
     template <typename T>
@@ -467,37 +527,72 @@ class Communicator
     {
         int sendcount = recvcounts__[rank()];
 
+#if defined(__GPU_NVTX_MPI)
+        acc::begin_range_marker("MPI_Gatherv");
+#endif
         CALL_MPI(MPI_Gatherv, (sendbuf__, sendcount, mpi_type_wrapper<T>::kind(), recvbuf__, recvcounts__, displs__,
                                mpi_type_wrapper<T>::kind(), root__, mpi_comm_));
+#if defined(__GPU_NVTX_MPI)
+        acc::end_range_marker();
+#endif
     }
 
     template <typename T>
     void scatter(T const* sendbuf__, T* recvbuf__, int const* sendcounts__, int const* displs__, int root__) const
     {
+#if defined(__GPU_NVTX_MPI)
+        acc::begin_range_marker("MPI_Scatterv");
+#endif
         int recvcount = sendcounts__[rank()];
         CALL_MPI(MPI_Scatterv, (sendbuf__, sendcounts__, displs__, mpi_type_wrapper<T>::kind(), recvbuf__, recvcount,
                                 mpi_type_wrapper<T>::kind(), root__, mpi_comm_));
+#if defined(__GPU_NVTX_MPI)
+        acc::end_range_marker();
+#endif
     }
 
     template <typename T>
     void alltoall(T const* sendbuf__, int sendcounts__, T* recvbuf__, int recvcounts__) const
     {
+#if defined(__GPU_NVTX_MPI)
+        acc::begin_range_marker("MPI_Alltoall");
+#endif
         CALL_MPI(MPI_Alltoall, (sendbuf__, sendcounts__, mpi_type_wrapper<T>::kind(), recvbuf__, recvcounts__,
                                 mpi_type_wrapper<T>::kind(), mpi_comm_));
+#if defined(__GPU_NVTX_MPI)
+        acc::end_range_marker();
+#endif
     }
 
     template <typename T>
-    void alltoall(T const* sendbuf__, int const* sendcounts__, int const* sdispls__, T* recvbuf__,
-                  int const* recvcounts__, int const* rdispls__) const
+    void alltoall(T const* sendbuf__,
+                  int const* sendcounts__,
+                  int const* sdispls__,
+                  T* recvbuf__,
+                  int const* recvcounts__,
+                  int const* rdispls__) const
     {
+#if defined(__GPU_NVTX_MPI)
+        acc::begin_range_marker("MPI_Alltoallv");
+#endif
         CALL_MPI(MPI_Alltoallv, (sendbuf__, sendcounts__, sdispls__, mpi_type_wrapper<T>::kind(), recvbuf__,
                                  recvcounts__, rdispls__, mpi_type_wrapper<T>::kind(), mpi_comm_));
+#if defined(__GPU_NVTX_MPI)
+        acc::end_range_marker();
+#endif
     }
 
     Communicator split(int color__) const
     {
         Communicator new_comm;
         MPI_Comm_split(mpi_comm(), color__, rank(), &new_comm.mpi_comm());
+        return std::move(new_comm);
+    }
+
+    Communicator duplicate() const
+    {
+        Communicator new_comm;
+        MPI_Comm_dup(mpi_comm(), &new_comm.mpi_comm());
         return std::move(new_comm);
     }
 
@@ -582,6 +677,12 @@ inline Communicator const& mpi_comm_self()
 inline Communicator const& mpi_comm_world()
 {
     static Communicator comm(MPI_COMM_WORLD);
+    return comm;
+}
+
+inline Communicator const& mpi_comm_null()
+{
+    static Communicator comm(MPI_COMM_NULL);
     return comm;
 }
 

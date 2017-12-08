@@ -31,7 +31,7 @@
 #include "atom_symmetry_class.h"
 #include "atom.h"
 #include "mpi_grid.hpp"
-#include "symmetry.h"
+#include "unit_cell_symmetry.h"
 #include "simulation_parameters.h"
 #include "json.hpp"
 
@@ -39,6 +39,7 @@ namespace sirius {
 
 using json = nlohmann::json;
 
+/// Representation of a unit cell.
 class Unit_cell
 {
     private:
@@ -138,13 +139,6 @@ class Unit_cell
         /** This is equal to the total number of matching coefficients for each plane-wave. */
         int mt_aw_basis_size_{0};
 
-        /// List of augmented wave basis descriptors.
-        /** Establishes mapping between global index in the range [0, mt_aw_basis_size_) 
-         *  and corresponding atom and local index \f$ \xi \f$ */
-        std::vector<mt_basis_descriptor> mt_aw_basis_descriptors_; 
-
-        std::vector<mt_basis_descriptor> mt_lo_basis_descriptors_; 
-        
         /// Total number of local orbital basis functions.
         int mt_lo_basis_size_{0};
 
@@ -168,7 +162,7 @@ class Unit_cell
 
         Communicator_bundle comm_bundle_atoms_;
         
-        std::unique_ptr<Symmetry> symmetry_;
+        std::unique_ptr<Unit_cell_symmetry> symmetry_;
 
         Communicator const& comm_;
 
@@ -575,17 +569,7 @@ class Unit_cell
             return nearest_neighbours_[ia][i];
         }
 
-        inline mt_basis_descriptor const& mt_aw_basis_descriptor(int idx) const
-        {
-            return mt_aw_basis_descriptors_[idx];
-        }
-
-        inline mt_basis_descriptor const& mt_lo_basis_descriptor(int idx) const
-        {
-            return mt_lo_basis_descriptors_[idx];
-        }
-
-        inline Symmetry const& symmetry() const
+        inline Unit_cell_symmetry const& symmetry() const
         {
             return (*symmetry_);
         }
@@ -639,6 +623,11 @@ class Unit_cell
         Simulation_parameters const& parameters() const
         {
             return parameters_;
+        }
+
+        Communicator const& comm() const
+        {
+            return comm_;
         }
 };
     
@@ -717,7 +706,9 @@ inline void Unit_cell::initialize()
         }
     }
     
-    get_symmetry();
+    if (parameters_.use_symmetry()) {
+        get_symmetry();
+    }
     
     spl_num_atom_symmetry_classes_ = splindex<block>(num_atom_symmetry_classes(), comm_.size(), comm_.rank());
     
@@ -730,23 +721,14 @@ inline void Unit_cell::initialize()
     
     volume_it_ = omega() - volume_mt_;
 
-    mt_aw_basis_descriptors_.resize(mt_aw_basis_size_);
-    for (int ia = 0, n = 0; ia < num_atoms(); ia++) {
-        for (int xi = 0; xi < atom(ia).mt_aw_basis_size(); xi++, n++) {
-            mt_aw_basis_descriptors_[n].ia = ia;
-            mt_aw_basis_descriptors_[n].xi = xi;
-        }
-    }
-
-    mt_lo_basis_descriptors_.resize(mt_lo_basis_size_);
-    for (int ia = 0, n = 0; ia < num_atoms(); ia++) {
-        for (int xi = 0; xi < atom(ia).mt_lo_basis_size(); xi++, n++) {
-            mt_lo_basis_descriptors_[n].ia = ia;
-            mt_lo_basis_descriptors_[n].xi = xi;
-        }
-    }
-
     init_paw();
+
+    //== write_cif();
+
+    //== if (comm().rank() == 0) {
+    //==     std::ofstream ofs(std::string("unit_cell.json"), std::ofstream::out | std::ofstream::trunc);
+    //==     ofs << serialize().dump(4);
+    //== }
 }
 
 inline void Unit_cell::get_symmetry()
@@ -781,8 +763,9 @@ inline void Unit_cell::get_symmetry()
         types[ia] = atom(ia).type_id();
     }
     
-    symmetry_ = std::unique_ptr<Symmetry>(new Symmetry(lattice_vectors_, num_atoms(), positions, spins, types,
-                                                       parameters_.spglib_tolerance()));
+    symmetry_ = std::unique_ptr<Unit_cell_symmetry>(new Unit_cell_symmetry(lattice_vectors_, num_atoms(), positions,
+                                                                           spins, types,
+                                                                           parameters_.spglib_tolerance()));
 
     int atom_class_id{-1};
     std::vector<int> asc(num_atoms(), -1);
@@ -980,11 +963,30 @@ inline void Unit_cell::print_info(int verbosity_)
     }
     if (verbosity_ >= 2) {
         printf("\n");
-        printf("atom id              position            type id    class id\n");
-        printf("------------------------------------------------------------\n");
+        printf("atom id              position                    vector_field        type id    class id\n");
+        printf("----------------------------------------------------------------------------------------\n");
         for (int i = 0; i < num_atoms(); i++) {
             auto pos = atom(i).position();
-            printf("%6i      %f %f %f   %6i      %6i\n", i, pos[0], pos[1], pos[2], atom(i).type_id(), atom(i).symmetry_class_id());
+            auto vf = atom(i).vector_field();
+            printf("%6i      %f %f %f   %f %f %f   %6i      %6i\n", i, pos[0], pos[1], pos[2], vf[0], vf[1], vf[2], 
+                   atom(i).type_id(), atom(i).symmetry_class_id());
+        }
+   
+        printf("\n");
+        for (int ic = 0; ic < num_atom_symmetry_classes(); ic++) {
+            printf("class id : %i   atom id : ", ic);
+            for (int i = 0; i < atom_symmetry_class(ic).num_atoms(); i++) {
+                printf("%i ", atom_symmetry_class(ic).atom_id(i));
+            }
+            printf("\n");
+        }
+        printf("\n");
+        printf("atom id              position (Cartesian, a.u.)\n");
+        printf("----------------------------------------------------------------------------------------\n");
+        for (int i = 0; i < num_atoms(); i++) {
+            auto pos = atom(i).position();
+            auto vc = get_cartesian_coordinates(pos);
+            printf("%6i      %18.12f %18.12f %18.12f\n", i, vc[0], vc[1], vc[2]);
         }
    
         printf("\n");
@@ -1066,9 +1068,9 @@ inline unit_cell_parameters_descriptor Unit_cell::unit_cell_parameters()
     d.b = v1.length();
     d.c = v2.length();
 
-    d.alpha = acos((v1 * v2) / d.b / d.c) * 180 / pi;
-    d.beta  = acos((v0 * v2) / d.a / d.c) * 180 / pi;
-    d.gamma = acos((v0 * v1) / d.a / d.b) * 180 / pi;
+    d.alpha = std::acos(dot(v1, v2) / d.b / d.c) * 180 / pi;
+    d.beta  = std::acos(dot(v0, v2) / d.a / d.c) * 180 / pi;
+    d.gamma = std::acos(dot(v0, v1) / d.a / d.b) * 180 / pi;
 
     return d;
 }

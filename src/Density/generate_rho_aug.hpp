@@ -1,32 +1,25 @@
 template <device_t pu>
-inline void Density::generate_rho_aug(std::vector<Periodic_function<double>*> rho__,
-                                      mdarray<double_complex, 2>& rho_aug__)
+inline void Density::generate_rho_aug(mdarray<double_complex, 2>& rho_aug__)
 {
     PROFILE("sirius::Density::generate_rho_aug");
 
-    if (pu == CPU) {
-        rho_aug__.zero();
-    }
-
-    #ifdef __GPU
-    if (pu == GPU) {
-        rho_aug__.zero_on_device();
-    }
-    #endif
+    rho_aug__.zero<(pu == CPU) ? memory_t::host : memory_t::device>();
     
     ctx_.augmentation_op(0).prepare(0);
 
     for (int iat = 0; iat < unit_cell_.num_atom_types(); iat++) {
         auto& atom_type = unit_cell_.atom_type(iat);
-        if (!atom_type.pp_desc().augment) {
-            #ifdef __GPU
-            if (ctx_.processing_unit() == GPU) {
-                acc::sync_stream(0);
-                if (iat + 1 != unit_cell_.num_atom_types()) {
-                    ctx_.augmentation_op(iat + 1).prepare(0);
-                }
+
+        #ifdef __GPU
+        if (ctx_.processing_unit() == GPU) {
+            acc::sync_stream(0);
+            if (iat + 1 != unit_cell_.num_atom_types()) {
+                ctx_.augmentation_op(iat + 1).prepare(0);
             }
-            #endif
+        }
+        #endif
+
+        if (!atom_type.pp_desc().augment) {
             continue;
         }
 
@@ -40,7 +33,7 @@ inline void Density::generate_rho_aug(std::vector<Periodic_function<double>*> rh
             /* treat phase factors as real array with x2 size */
             mdarray<double, 2> phase_factors(atom_type.num_atoms(), ctx_.gvec().count() * 2);
 
-            #pragma omp parallel for
+            #pragma omp parallel for schedule(static)
             for (int igloc = 0; igloc < ctx_.gvec().count(); igloc++) {
                 int ig = ctx_.gvec().offset() + igloc;
                 for (int i = 0; i < atom_type.num_atoms(); i++) {
@@ -92,7 +85,7 @@ inline void Density::generate_rho_aug(std::vector<Periodic_function<double>*> rh
         #ifdef __GPU
         if (pu == GPU) {
             dm.allocate(memory_t::device);
-            dm.copy_to_device();
+            dm.copy<memory_t::host, memory_t::device>();
 
             /* treat auxiliary array as double with x2 size */
             mdarray<double, 2> dm_pw(nullptr, nbf * (nbf + 1) / 2, ctx_.gvec().count() * 2);
@@ -100,11 +93,6 @@ inline void Density::generate_rho_aug(std::vector<Periodic_function<double>*> rh
 
             mdarray<double, 1> phase_factors(nullptr, atom_type.num_atoms() * ctx_.gvec().count() * 2);
             phase_factors.allocate(memory_t::device);
-
-            acc::sync_stream(0);
-            if (iat + 1 != unit_cell_.num_atom_types()) {
-                ctx_.augmentation_op(iat + 1).prepare(0);
-            }
 
             for (int iv = 0; iv < ctx_.num_mag_dims() + 1; iv++) {
                 generate_dm_pw_gpu(atom_type.num_atoms(),
@@ -130,17 +118,23 @@ inline void Density::generate_rho_aug(std::vector<Periodic_function<double>*> rh
         #endif
     }
 
-    #ifdef __GPU
     if (pu == GPU) {
-        rho_aug__.copy_to_host();
+        rho_aug__.copy<memory_t::device, memory_t::host>();
     }
-    #endif
     
-    #ifdef __PRINT_OBJECT_CHECKSUM
-    {
+    if (ctx_.control().print_checksum_) {
          auto cs = rho_aug__.checksum();
-         DUMP("checksum(rho_aug): %20.14f %20.14f", cs.real(), cs.imag());
+         ctx_.comm().allreduce(&cs, 1);
+         if (ctx_.comm().rank() == 0) {
+            print_checksum("rho_aug", cs);
+         }
     }
-    #endif
+
+    if (ctx_.control().print_hash_) {
+         auto h = rho_aug__.hash();
+         if (ctx_.comm().rank() == 0) {
+            print_hash("rho_aug", h);
+         }
+    }
 }
 

@@ -29,10 +29,11 @@
 #include <fstream>
 #include <string>
 #include <complex>
-#include "sirius_internal.h"
 #include "typedefs.h"
 #include "constants.h"
 #include "sddk.hpp"
+
+using namespace sddk;
 
 /// Utility class.
 class Utils
@@ -315,25 +316,6 @@ class Utils
             }
         }
         
-        template <typename T>
-        static inline double check_hermitian(dmatrix<T>& mtrx__, int n__)
-        {
-            dmatrix<T> tmp(n__, n__, mtrx__.blacs_grid(), mtrx__.bs_row(), mtrx__.bs_col());
-            linalg<CPU>::tranc(n__, n__, mtrx__, 0, 0, tmp, 0, 0);
-
-            splindex<block_cyclic> spl_r(n__, mtrx__.blacs_grid().num_ranks_row(), mtrx__.blacs_grid().rank_row(), mtrx__.bs_row());
-            splindex<block_cyclic> spl_c(n__, mtrx__.blacs_grid().num_ranks_col(), mtrx__.blacs_grid().rank_col(), mtrx__.bs_col());
-            
-            double max_diff{0};
-            for (int i = 0; i < spl_c.local_size(); i++) {
-                for (int j = 0; j < spl_r.local_size(); j++) {
-                    max_diff = std::max(max_diff, std::abs(mtrx__(j, i) - tmp(j, i)));
-                }
-            }
-            mtrx__.blacs_grid().comm().template allreduce<double, mpi_op_t::max>(&max_diff, 1);
-            return max_diff;
-        }
-
         static double confined_polynomial(double r, double R, int p1, int p2, int dm)
         {
             double t = 1.0 - std::pow(r / R, 2);
@@ -386,24 +368,16 @@ class Utils
             return a0 + b;
         }
 
+        inline static double_complex round(double_complex a__, int n__)
+        {
+            return double_complex(round(a__.real(), n__), round(a__.imag(), n__));
+        }
+
         template <typename T>
         inline static int sign(T val)
         {
             return (T(0) < val) - (val < T(0));
         }
-
-        static json serialize_timers() // TODO: here in wrong place; move somewhere else
-        {
-            json dict;
-
-            /* collect local timers */
-            for (auto& it: sddk::timer::timer_values()) {
-                sddk::timer_stats_t ts;
-                dict[it.first] = {it.second.tot_val, it.second.tot_val / it.second.count, it.second.min_val, it.second.max_val};
-            }
-            return std::move(dict);
-        }
-
 };
 
 #endif

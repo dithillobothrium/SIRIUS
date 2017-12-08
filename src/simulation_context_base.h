@@ -25,6 +25,8 @@
 #ifndef __SIMULATION_CONTEXT_BASE_H__
 #define __SIMULATION_CONTEXT_BASE_H__
 
+#include <algorithm>
+
 #include "version.h"
 #include "simulation_parameters.h"
 #include "mpi_grid.hpp"
@@ -35,7 +37,7 @@ extern "C" void generate_phase_factors_gpu(int num_gvec_loc__,
                                            int num_atoms__,
                                            int const* gvec__,
                                            double const* atom_pos__,
-                                           cuDoubleComplex* phase_factors__);
+                                           double_complex* phase_factors__);
 #endif
 
 namespace sirius {
@@ -71,16 +73,20 @@ class Simulation_context_base: public Simulation_parameters
         /// G-vectors within the 2 * |Gmax^{WF}| cutoff.
         Gvec gvec_coarse_;
 
+        std::unique_ptr<remap_gvec_to_shells> remap_gvec_; 
+
         /// Creation time of the parameters.
         timeval start_time_;
 
         std::string start_time_tag_;
 
-        ev_solver_t std_evp_solver_type_{ev_lapack};
+        ev_solver_t std_evp_solver_type_{ev_solver_t::lapack};
 
-        ev_solver_t gen_evp_solver_type_{ev_lapack};
+        ev_solver_t gen_evp_solver_type_{ev_solver_t::lapack};
 
         mdarray<double_complex, 3> phase_factors_;
+
+        mdarray<double_complex, 3> sym_phase_factors_;
         
         mdarray<int, 2> gvec_coord_;
 
@@ -92,11 +98,45 @@ class Simulation_context_base: public Simulation_parameters
 
         std::unique_ptr<Radial_integrals_beta<true>> beta_ri_djl_;
 
+        std::unique_ptr<Radial_integrals_aug<false>> aug_ri_;
+
+        std::unique_ptr<Radial_integrals_atomic_wf> atomic_wf_ri_;
+
+        std::vector<std::vector<std::pair<int, double>>> atoms_to_grid_idx_;
+
+        // TODO remove to somewhere
+        const double av_atom_radius_{2.0};
+
         double time_active_;
         
         bool initialized_{false};
 
-        void init_fft();
+        inline void init_fft()
+        {
+            auto rlv = unit_cell_.reciprocal_lattice_vectors();
+
+            if (!(control().fft_mode_ == "serial" || control().fft_mode_ == "parallel")) {
+                TERMINATE("wrong FFT mode");
+            }
+
+            /* create FFT driver for dense mesh (density and potential) */
+            fft_ = std::unique_ptr<FFT3D>(new FFT3D(find_translations(pw_cutoff(), rlv), comm_fft(), processing_unit())); 
+
+            /* create a list of G-vectors for dense FFT grid; G-vectors are divided between all available MPI ranks.*/
+            gvec_ = Gvec(rlv, pw_cutoff(), comm(), comm_fft(), control().reduce_gvec_);
+
+            remap_gvec_ = std::unique_ptr<remap_gvec_to_shells>(new remap_gvec_to_shells(comm(), gvec()));
+
+            /* prepare fine-grained FFT driver for the entire simulation */
+            fft_->prepare(gvec_.partition());
+
+            /* create FFT driver for coarse mesh */
+            auto fft_coarse_grid = FFT3D_grid(find_translations(2 * gk_cutoff(), rlv));
+            fft_coarse_ = std::unique_ptr<FFT3D>(new FFT3D(fft_coarse_grid, comm_fft_coarse(), processing_unit()));
+
+            /* create a list of G-vectors for corase FFT grid */
+            gvec_coarse_ = Gvec(rlv, gk_cutoff() * 2, comm(), comm_fft_coarse(), control().reduce_gvec_);
+        }
 
         /* copy constructor is forbidden */
         Simulation_context_base(Simulation_context_base const&) = delete;
@@ -107,8 +147,76 @@ class Simulation_context_base: public Simulation_parameters
 
             tm const* ptm = localtime(&start_time_.tv_sec); 
             char buf[100];
-            strftime(buf, sizeof(buf), "%Y%m%d%H%M%S", ptm);
+            strftime(buf, sizeof(buf), "%Y%m%d_%H%M%S", ptm);
             start_time_tag_ = std::string(buf);
+        }
+
+        void init_atoms_to_grid_idx()
+        {
+            PROFILE("sirius::Simulation_context_base::init_atoms_to_grid_idx");
+
+            atoms_to_grid_idx_.resize(unit_cell_.num_atoms());
+
+            vector3d<double> delta(1.0 / (fft_->grid().size(0) ), 1.0 / (fft_->grid().size(1) ), 1.0 / (fft_->grid().size(2) ));
+
+            int z_off = fft_->offset_z();
+            vector3d<int> grid_beg(0, 0, z_off);
+            vector3d<int> grid_end(fft_->grid().size(0), fft_->grid().size(1), z_off + fft_->local_size_z());
+
+            double R = av_atom_radius_; // appRoximate atom radius in bohr
+            std::vector<vector3d<double>> verts_cart{{-R,-R,-R},{R,-R,-R},{-R,R,-R},{R,R,-R},{-R,-R,R},{R,-R,R},{-R,R,R},{R,R,R}};
+
+            auto bounds_box = [&](vector3d<double> pos)
+            {
+                std::vector<vector3d<double>> verts;
+
+                for (auto v : verts_cart) {
+                    verts.push_back( pos + unit_cell_.get_fractional_coordinates(v) );
+                }
+
+                std::pair<vector3d<int>,vector3d<int>> bounds_ind;
+
+                size_t size = verts.size();
+                for (int i : {0,1,2}) {
+                    std::sort(verts.begin(), verts.end(), [i](vector3d<double>& a, vector3d<double>& b) { return a[i] < b[i]; });
+                    bounds_ind.first[i]  = std::max((int)(verts[0][i] / delta[i])-1, grid_beg[i]);
+                    bounds_ind.second[i] = std::min((int)(verts[size-1][i] / delta[i])+1, grid_end[i]);
+                }
+
+                return bounds_ind;
+            };
+
+            #pragma omp parallel for
+            for (int ia = 0; ia < unit_cell_.num_atoms(); ia++) {
+
+                std::vector<std::pair<int,double>> atom_to_inds_map;
+
+                for (int t0 = -1; t0 <= 1; t0++) {
+                    for (int t1 = -1; t1 <= 1; t1++) {
+                        for (int t2 = -1; t2 <= 1; t2++) {
+                            auto position = unit_cell_.atom(ia).position() + vector3d<double>(t0, t1, t2);
+
+                            auto box = bounds_box(position);
+
+                            for (int j0 = box.first[0]; j0 < box.second[0]; j0++) {
+                                for (int j1 = box.first[1]; j1 < box.second[1]; j1++) {
+                                    for (int j2 = box.first[2]; j2 < box.second[2]; j2++) {
+                                        auto dist = position - vector3d<double>(double(j0)* delta[0], double(j1) * delta[1], double(j2) * delta[2]);
+                                        auto r = unit_cell_.get_cartesian_coordinates(dist).length();
+                                        auto ir = fft_->grid().index_by_coord(j0, j1, j2 - z_off);
+
+                                        if (r <= R) {
+                                            atom_to_inds_map.push_back({ir, r});
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                atoms_to_grid_idx_[ia] = std::move(atom_to_inds_map);
+            }
         }
 
     public:
@@ -142,6 +250,16 @@ class Simulation_context_base: public Simulation_parameters
         /// Initialize the similation (can only be called once).
         void initialize();
 
+        std::vector<std::vector<std::pair<int,double>>> const& atoms_to_grid_idx_map()
+        {
+            return atoms_to_grid_idx_;
+        };
+
+        double av_atom_radius()
+        {
+            return av_atom_radius_;
+        }
+
         void print_info();
 
         Unit_cell& unit_cell()
@@ -172,6 +290,11 @@ class Simulation_context_base: public Simulation_parameters
         Gvec const& gvec_coarse() const
         {
             return gvec_coarse_;
+        }
+
+        remap_gvec_to_shells const& remap_gvec() const
+        {
+            return *remap_gvec_;
         }
 
         BLACS_grid const& blacs_grid() const
@@ -227,6 +350,11 @@ class Simulation_context_base: public Simulation_parameters
                 fout.create_node("density");
                 fout.create_node("magnetization");
                 
+                for (int j = 0; j < num_mag_dims(); j++) {
+                    fout["magnetization"].create_node(j);
+                    fout["effective_magnetic_field"].create_node(j);
+                }
+                
                 fout["parameters"].write("num_spins", num_spins());
                 fout["parameters"].write("num_mag_dims", num_mag_dims());
                 fout["parameters"].write("num_bands", num_bands());
@@ -234,7 +362,9 @@ class Simulation_context_base: public Simulation_parameters
                 mdarray<int, 2> gv(3, gvec_.num_gvec());
                 for (int ig = 0; ig < gvec_.num_gvec(); ig++) {
                     auto G = gvec_.gvec(ig);
-                    for (int x: {0, 1, 2}) gv(x, ig) = G[x];
+                    for (int x: {0, 1, 2}) {
+                        gv(x, ig) = G[x];
+                    }
                 }
                 fout["parameters"].write("num_gvec", gvec_.num_gvec());
                 fout["parameters"].write("gvec", gv);
@@ -255,6 +385,18 @@ class Simulation_context_base: public Simulation_parameters
         inline ev_solver_t gen_evp_solver_type() const
         {
             return gen_evp_solver_type_;
+        }
+        
+        template <typename T>
+        inline std::unique_ptr<Eigensolver<T>> std_evp_solver()
+        {
+            return std::move(Eigensolver_factory<T>(std_evp_solver_type_));
+        }
+
+        template <typename T>
+        inline std::unique_ptr<Eigensolver<T>> gen_evp_solver()
+        {
+            return std::move(Eigensolver_factory<T>(gen_evp_solver_type_));
         }
 
         /// Phase factors \f$ e^{i {\bf G} {\bf r}_{\alpha}} \f$
@@ -354,44 +496,59 @@ class Simulation_context_base: public Simulation_parameters
             return memory_buffer_.at<CPU>();
         }
 
-        Radial_integrals_beta<false> const& beta_ri() const
+        inline Radial_integrals_beta<false> const& beta_ri() const
         {
             return *beta_ri_;
         }
 
-        Radial_integrals_beta<true> const& beta_ri_djl() const
+        inline Radial_integrals_beta<true> const& beta_ri_djl() const
         {
             return *beta_ri_djl_;
         }
+
+        inline Radial_integrals_aug<false> const& aug_ri() const
+        {
+            return *aug_ri_;
+        }
+
+        inline Radial_integrals_atomic_wf const& atomic_wf_ri() const
+        {
+            return *atomic_wf_ri_;
+        }
+        
+        /// Find the lambda parameter used in the Ewald summation.
+        /** lambda parameter scales the erfc function argument:
+         *  \f[
+         *    {\rm erf}(\sqrt{\lambda}x)
+         *  \f]
+         */
+        double ewald_lambda()
+        {
+            /* alpha = 1 / (2*sigma^2), selecting alpha here for better convergence */
+            double lambda{1};
+            double gmax = pw_cutoff();
+            double upper_bound{0};
+            double charge = unit_cell_.num_electrons();
+            
+            /* iterate to find lambda */
+            do {
+                lambda += 0.1;
+                upper_bound = charge * charge * std::sqrt(2.0 * lambda / twopi) * gsl_sf_erfc(gmax * std::sqrt(1.0 / (4.0 * lambda)));
+            } while (upper_bound < 1.0e-8);
+
+            if (lambda < 1.5) {
+                std::stringstream s;
+                s << "Ewald forces error: probably, pw_cutoff is too small.";
+                WARNING(s);
+            }
+            return lambda;
+        }
+
+        mdarray<double_complex, 3> const& sym_phase_factors() const
+        {
+            return sym_phase_factors_;
+        }
 };
-
-inline void Simulation_context_base::init_fft()
-{
-    auto rlv = unit_cell_.reciprocal_lattice_vectors();
-
-    int npr = control().mpi_grid_dims_[0];
-    int npc = control().mpi_grid_dims_[1];
-
-    if (!(control().fft_mode_ == "serial" || control().fft_mode_ == "parallel")) {
-        TERMINATE("wrong FFT mode");
-    }
-
-    /* create FFT driver for dense mesh (density and potential) */
-    fft_ = std::unique_ptr<FFT3D>(new FFT3D(find_translations(pw_cutoff(), rlv), comm_fft(), processing_unit())); 
-
-    /* create a list of G-vectors for dense FFT grid; G-vectors are divided between all available MPI ranks.*/
-    gvec_ = Gvec(rlv, pw_cutoff(), comm(), comm_fft(), control().reduce_gvec_);
-
-    /* prepare fine-grained FFT driver for the entire simulation */
-    fft_->prepare(gvec_.partition());
-
-    /* create FFT driver for coarse mesh */
-    fft_coarse_ = std::unique_ptr<FFT3D>(new FFT3D(find_translations(2 * gk_cutoff(), rlv), comm_fft_coarse(),
-                                                   processing_unit()));
-
-    /* create a list of G-vectors for corase FFT grid */
-    gvec_coarse_ = Gvec(rlv, gk_cutoff() * 2, comm(), comm_fft_coarse(), control().reduce_gvec_);
-}
 
 inline void Simulation_context_base::initialize()
 {
@@ -401,6 +558,11 @@ inline void Simulation_context_base::initialize()
     if (initialized_) {
         TERMINATE("Simulation parameters are already initialized.");
     }
+    /* Gamma-point calculation and non-collinear magnetism are not compatible */
+    if (num_mag_dims() == 3) {
+        set_gamma_point(false);
+    }
+
     set_esm_type(parameters_input().esm_);
     set_core_relativity(parameters_input().core_relativity_);
     set_valence_relativity(parameters_input().valence_relativity_);
@@ -444,9 +606,6 @@ inline void Simulation_context_base::initialize()
     /* setup MPI grid */
     mpi_grid_ = std::unique_ptr<MPI_grid>(new MPI_grid({npr, npc, npk}, comm_));
     
-    /* setup BLACS grid */
-    blacs_grid_ = std::unique_ptr<BLACS_grid>(new BLACS_grid(comm_band(), npr, npc));
-
     /* can't use reduced G-vectors in LAPW code */
     if (full_potential()) {
         control_input_.reduce_gvec_ = false;
@@ -477,11 +636,13 @@ inline void Simulation_context_base::initialize()
     /* initialize FFT interface */
     init_fft();
 
+    init_atoms_to_grid_idx();
+
     if (comm_.rank() == 0 && control().print_memory_usage_) {
         MEMORY_USAGE_INFO();
     }
 
-    if (unit_cell_.num_atoms() != 0) {
+    if (unit_cell_.num_atoms() != 0 && use_symmetry()) {
         unit_cell_.symmetry().check_gvec_symmetry(gvec_, comm_);
         if (!full_potential()) {
             unit_cell_.symmetry().check_gvec_symmetry(gvec_coarse_, comm_);
@@ -507,6 +668,20 @@ inline void Simulation_context_base::initialize()
         }
     }
     
+    if (use_symmetry()) {
+        sym_phase_factors_ = mdarray<double_complex, 3>(3, limits, unit_cell().symmetry().num_mag_sym());
+
+        #pragma omp parallel for
+        for (int i = limits.first; i <= limits.second; i++) {
+            for (int isym = 0; isym < unit_cell().symmetry().num_mag_sym(); isym++) {
+                auto t = unit_cell().symmetry().magnetic_group_symmetry(isym).spg_op.t;
+                for (int x: {0, 1, 2}) {
+                    sym_phase_factors_(x, i, isym) = std::exp(double_complex(0.0, twopi * (i * t[x])));
+                }
+            }
+        }
+    }
+    
     /* take 10% of empty non-magnetic states */
     if (num_fv_states() < 0) {
         set_num_fv_states(static_cast<int>(unit_cell_.num_valence_electrons() / 2.0) +
@@ -517,17 +692,6 @@ inline void Simulation_context_base::initialize()
         std::stringstream s;
         s << "not enough first-variational states : " << num_fv_states();
         TERMINATE(s);
-    }
-    
-    /* setup the cyclic block size */
-    if (cyclic_block_size() < 0) {
-        double a = std::min(std::log2(double(num_fv_states()) / blacs_grid_->num_ranks_col()),
-                            std::log2(double(num_fv_states()) / blacs_grid_->num_ranks_row()));
-        if (a < 1) {
-            control_input_.cyclic_block_size_ = 2;
-        } else {
-            control_input_.cyclic_block_size_ = static_cast<int>(std::min(128.0, std::pow(2.0, static_cast<int>(a))) + 1e-12);
-        }
     }
     
     std::string evsn[] = {std_evp_solver_name(), gen_evp_solver_name()};
@@ -568,16 +732,14 @@ inline void Simulation_context_base::initialize()
 
     ev_solver_t* evst[] = {&std_evp_solver_type_, &gen_evp_solver_type_};
 
-    std::map<std::string, ev_solver_t> str_to_ev_solver_t;
-
-    str_to_ev_solver_t["lapack"]    = ev_lapack;
-    str_to_ev_solver_t["scalapack"] = ev_scalapack;
-    str_to_ev_solver_t["elpa1"]     = ev_elpa1;
-    str_to_ev_solver_t["elpa2"]     = ev_elpa2;
-    str_to_ev_solver_t["magma"]     = ev_magma;
-    str_to_ev_solver_t["plasma"]    = ev_plasma;
-    str_to_ev_solver_t["rs_cpu"]    = ev_rs_cpu;
-    str_to_ev_solver_t["rs_gpu"]    = ev_rs_gpu;
+    std::map<std::string, ev_solver_t> str_to_ev_solver_t = {
+        {"lapack",    ev_solver_t::lapack},
+        {"scalapack", ev_solver_t::scalapack},
+        {"elpa1",     ev_solver_t::elpa1},
+        {"elpa2",     ev_solver_t::elpa2},
+        {"magma",     ev_solver_t::magma},
+        {"plasma",    ev_solver_t::plasma}
+    };
 
     for (int i: {0, 1}) {
         auto name = evsn[i];
@@ -589,6 +751,32 @@ inline void Simulation_context_base::initialize()
         }
         *evst[i] = str_to_ev_solver_t[name];
     }
+
+    auto std_solver = std_evp_solver<double>();
+    auto gen_solver = gen_evp_solver<double>();
+
+    if (std_solver->is_parallel() != gen_solver->is_parallel()) {
+        TERMINATE("both solvers must be sequential or parallel");
+    }
+
+    /* setup BLACS grid */
+    if (std_solver->is_parallel()) {
+        blacs_grid_ = std::unique_ptr<BLACS_grid>(new BLACS_grid(comm_band(), npr, npc));
+    } else {
+        blacs_grid_ = std::unique_ptr<BLACS_grid>(new BLACS_grid(mpi_comm_self(), 1, 1));
+    }
+
+    /* setup the cyclic block size */
+    if (cyclic_block_size() < 0) {
+        double a = std::min(std::log2(double(num_fv_states()) / blacs_grid_->num_ranks_col()),
+                            std::log2(double(num_fv_states()) / blacs_grid_->num_ranks_row()));
+        if (a < 1) {
+            control_input_.cyclic_block_size_ = 2;
+        } else {
+            control_input_.cyclic_block_size_ = static_cast<int>(std::min(128.0, std::pow(2.0, static_cast<int>(a))) + 1e-12);
+        }
+    }
+    
 
     if (processing_unit() == GPU) {
         gvec_coord_ = mdarray<int, 2>(gvec_.count(), 3, memory_t::host | memory_t::device, "gvec_coord_");
@@ -615,15 +803,26 @@ inline void Simulation_context_base::initialize()
     }
     
     if (!full_potential()) {
-        beta_ri_ = std::unique_ptr<Radial_integrals_beta<false>>(new Radial_integrals_beta<false>(unit_cell(), gk_cutoff(), 20));
 
-        beta_ri_djl_ = std::unique_ptr<Radial_integrals_beta<true>>(new Radial_integrals_beta<true>(unit_cell(), gk_cutoff(), 20));
+        /* some extra length is added to cutoffs in order to interface with QE which may require ri(q) for q>cutoff */
+
+        beta_ri_ = std::unique_ptr<Radial_integrals_beta<false>>(new Radial_integrals_beta<false>(unit_cell(), gk_cutoff() + 1, settings().nprii_beta_));
+
+        beta_ri_djl_ = std::unique_ptr<Radial_integrals_beta<true>>(new Radial_integrals_beta<true>(unit_cell(), gk_cutoff() + 1, settings().nprii_beta_));
+        
+        aug_ri_ = std::unique_ptr<Radial_integrals_aug<false>>(new Radial_integrals_aug<false>(unit_cell(), pw_cutoff() + 1, settings().nprii_aug_));
+
+        atomic_wf_ri_ = std::unique_ptr<Radial_integrals_atomic_wf>(new Radial_integrals_atomic_wf(unit_cell(), gk_cutoff(), 20));
     }
 
     //time_active_ = -runtime::wtime();
 
     if (control().verbosity_ > 0 && comm_.rank() == 0) {
         print_info();
+    }
+
+    if (comm_.rank() == 0 && control().print_memory_usage_) {
+        MEMORY_USAGE_INFO();
     }
 
     initialized_ = true;
@@ -749,37 +948,37 @@ inline void Simulation_context_base::print_info()
     for (int i = 0; i < 2; i++) {
         printf("%s", evsn[i].c_str());
         switch (evst[i]) {
-            case ev_lapack: {
+            case ev_solver_t::lapack: {
                 printf("LAPACK\n");
                 break;
             }
             #ifdef __SCALAPACK
-            case ev_scalapack: {
+            case ev_solver_t::scalapack: {
                 printf("ScaLAPACK\n");
                 break;
             }
-            case ev_elpa1: {
+            case ev_solver_t::elpa1: {
                 printf("ELPA1\n");
                 break;
             }
-            case ev_elpa2: {
+            case ev_solver_t::elpa2: {
                 printf("ELPA2\n");
                 break;
             }
-            case ev_rs_gpu: {
-                printf("RS_gpu\n");
-                break;
-            }
-            case ev_rs_cpu: {
-                printf("RS_cpu\n");
-                break;
-            }
+            //case ev_rs_gpu: {
+            //    printf("RS_gpu\n");
+            //    break;
+            //}
+            //case ev_rs_cpu: {
+            //    printf("RS_cpu\n");
+            //    break;
+            //}
             #endif
-            case ev_magma: {
+            case ev_solver_t::magma: {
                 printf("MAGMA\n");
                 break;
             }
-            case ev_plasma: {
+            case ev_solver_t::plasma: {
                 printf("PLASMA\n");
                 break;
             }
@@ -802,7 +1001,7 @@ inline void Simulation_context_base::print_info()
     }
     if (processing_unit() == GPU) {
         #ifdef __GPU
-        cuda_device_info();
+        acc::print_device_info(0);
         #endif
     }
    

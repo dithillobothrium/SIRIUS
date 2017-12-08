@@ -26,6 +26,12 @@
 #define __LINALG_HPP__
 
 #include <stdint.h>
+#ifdef __GPU
+#include "GPU/cublas.hpp"
+#endif
+#ifdef __MAGMA
+#include "GPU/magma.hpp"
+#endif
 #include "blas_lapack.h"
 #include "mdarray.hpp"
 #include "dmatrix.hpp"
@@ -195,7 +201,10 @@ class linalg<CPU>: public linalg_base
 
         template <typename T>
         static void gemr2d(ftn_int m, ftn_int n, dmatrix<T>& A, ftn_int ia, ftn_int ja,
-                           dmatrix<T>& B, ftn_int ib, ftn_int jb, ftn_int gcontext); 
+                           dmatrix<T>& B, ftn_int ib, ftn_int jb, ftn_int gcontext);
+
+        template <typename T>
+        static void geqrf(ftn_int m, ftn_int n, dmatrix<T>& A, ftn_int ia, ftn_int ja);
 };
 
 #ifdef __GPU
@@ -472,15 +481,13 @@ inline void linalg<CPU>::heinv<ftn_double_complex>(ftn_int n, matrix<ftn_double_
 {
     std::vector<int> ipiv(n);
     int info = hetrf(n, A.at<CPU>(), A.ld(), &ipiv[0]);
-    if (info)
-    {
+    if (info) {
         printf("hetrf returned %i\n", info);
         exit(-1);
     }
 
     info = hetri(n, A.at<CPU>(), A.ld(), &ipiv[0]);
-    if (info)
-    {
+    if (info) {
         printf("hetri returned %i\n", info);
         exit(-1);
     }
@@ -793,6 +800,35 @@ inline ftn_int linalg<CPU>::trtri<ftn_double_complex>(ftn_int n, dmatrix<ftn_dou
     FORTRAN(pztrtri)("U", "N", &n, A.at<CPU>(), &ia, &ja, const_cast<int*>(A.descriptor()), &info, (ftn_len)1, (ftn_len)1);
     return info;
 }
+
+template <>
+inline void linalg<CPU>::geqrf<ftn_double_complex>(ftn_int m, ftn_int n, dmatrix<ftn_double_complex>& A, ftn_int ia, ftn_int ja)
+{
+    ia++; ja++;
+    ftn_int lwork = -1;
+    ftn_double_complex z;
+    ftn_int info;
+    FORTRAN(pzgeqrf)(&m, &n, A.at<CPU>(), &ia, &ja, const_cast<int*>(A.descriptor()), &z, &z, &lwork, &info);
+    lwork = static_cast<int>(z.real() + 1);
+    std::vector<ftn_double_complex> work(lwork);
+    std::vector<ftn_double_complex> tau(std::max(m, n));
+    FORTRAN(pzgeqrf)(&m, &n, A.at<CPU>(), &ia, &ja, const_cast<int*>(A.descriptor()), tau.data(), work.data(), &lwork, &info);
+}
+
+template <>
+inline void linalg<CPU>::geqrf<ftn_double>(ftn_int m, ftn_int n, dmatrix<ftn_double>& A, ftn_int ia, ftn_int ja)
+{
+    ia++; ja++;
+    ftn_int lwork = -1;
+    ftn_double z;
+    ftn_int info;
+    FORTRAN(pdgeqrf)(&m, &n, A.at<CPU>(), &ia, &ja, const_cast<int*>(A.descriptor()), &z, &z, &lwork, &info);
+    lwork = static_cast<int>(z + 1);
+    std::vector<ftn_double> work(lwork);
+    std::vector<ftn_double> tau(std::max(m, n));
+    FORTRAN(pdgeqrf)(&m, &n, A.at<CPU>(), &ia, &ja, const_cast<int*>(A.descriptor()), tau.data(), work.data(), &lwork, &info);
+}
+
 #else
 template<>
 inline void linalg<CPU>::gemm<ftn_double_complex>(int transa, int transb, ftn_int m, ftn_int n, ftn_int k,
@@ -822,7 +858,7 @@ inline void linalg<GPU>::gemv<ftn_double_complex>(int trans, ftn_int m, ftn_int 
                                                   ftn_double_complex* beta, ftn_double_complex* y, ftn_int incy,
                                                   int stream_id)
 {
-    cublas_zgemv(trans, m, n, alpha, A, lda, x, incx, beta, y, incy, stream_id);
+    cublas::zgemv(trans, m, n, (cuDoubleComplex*)alpha, (cuDoubleComplex*)A, lda, (cuDoubleComplex*)x, incx, (cuDoubleComplex*)beta, (cuDoubleComplex*)y, incy, stream_id);
 }
 
 // Generic interface to zgemm
@@ -832,7 +868,7 @@ inline void linalg<GPU>::gemm<ftn_double_complex>(int transa, int transb, ftn_in
                                                   ftn_double_complex const* B, ftn_int ldb, ftn_double_complex const* beta,
                                                   ftn_double_complex* C, ftn_int ldc, int stream_id)
 {
-    cublas_zgemm(transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc, stream_id);
+    cublas::zgemm(transa, transb, m, n, k, (cuDoubleComplex*)alpha, (cuDoubleComplex*)A, lda, (cuDoubleComplex*)B, ldb, (cuDoubleComplex*)beta, (cuDoubleComplex*)C, ldc, stream_id);
 }
 
 // Generic interface to dgemm
@@ -842,7 +878,7 @@ inline void linalg<GPU>::gemm<ftn_double>(int transa, int transb, ftn_int m, ftn
                                           ftn_double const* B, ftn_int ldb, ftn_double const* beta,
                                           ftn_double* C, ftn_int ldc, int stream_id)
 {
-    cublas_dgemm(transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc, stream_id);
+    cublas::dgemm(transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc, stream_id);
 }
 
 template<>
@@ -851,7 +887,7 @@ inline ftn_int linalg<GPU>::potrf<ftn_double>(ftn_int n,
                                               ftn_int lda)
 {
     #ifdef __MAGMA
-    return magma_dpotrf_wrapper('U', n, A, lda);
+    return magma::dpotrf('U', n, A, lda);
     #else
     printf("not compiled with MAGMA support\n");
     raise(SIGTERM);
@@ -865,7 +901,7 @@ inline ftn_int linalg<GPU>::potrf<ftn_double_complex>(ftn_int n,
                                                       ftn_int lda)
 {
     #ifdef __MAGMA
-    return magma_zpotrf_wrapper('U', n, A, lda);
+    return magma::zpotrf('U', n, (magmaDoubleComplex*)A, lda);
     #else
     printf("not compiled with MAGMA support\n");
     raise(SIGTERM);
@@ -879,7 +915,7 @@ inline ftn_int linalg<GPU>::trtri<ftn_double>(ftn_int n,
                                               ftn_int lda)
 {
     #ifdef __MAGMA
-    return magma_dtrtri_wrapper('U', n, A, lda);
+    return magma::dtrtri('U', n, A, lda);
     #else
     printf("not compiled with MAGMA support\n");
     raise(SIGTERM);
@@ -893,7 +929,7 @@ inline ftn_int linalg<GPU>::trtri<ftn_double_complex>(ftn_int n,
                                                       ftn_int lda)
 {
     #ifdef __MAGMA
-    return magma_ztrtri_wrapper('U', n, A, lda);
+    return magma::ztrtri('U', n, (magmaDoubleComplex*)A, lda);
     #else
     printf("not compiled with MAGMA support\n");
     raise(SIGTERM);
@@ -913,7 +949,7 @@ inline void linalg<GPU>::trmm<ftn_double>(char side,
                                           ftn_double* B,
                                           ftn_int ldb)
 {
-    cublas_dtrmm(side, uplo, transa, 'N', m, n, alpha, A, lda, B, ldb);
+    cublas::dtrmm(side, uplo, transa, 'N', m, n, alpha, A, lda, B, ldb);
 }
 
 template <>
@@ -928,7 +964,7 @@ inline void linalg<GPU>::trmm<ftn_double_complex>(char side,
                                                   ftn_double_complex* B,
                                                   ftn_int ldb)
 {
-    cublas_ztrmm(side, uplo, transa, 'N', m, n, alpha, A, lda, B, ldb);
+    cublas::ztrmm(side, uplo, transa, 'N', m, n, (cuDoubleComplex*)alpha, (cuDoubleComplex*)A, lda, (cuDoubleComplex*)B, ldb);
 }
 
 template<>
@@ -943,7 +979,7 @@ inline void linalg<GPU>::ger<ftn_double>(ftn_int     m,
                                          ftn_int     lda,
                                          int         stream_id)
 {
-    cublas_dger(m, n, alpha, x, incx, y, incy, A, lda, stream_id);
+    cublas::dger(m, n, alpha, x, incx, y, incy, A, lda, stream_id);
 }
 
 template<>
@@ -958,7 +994,7 @@ inline void linalg<GPU>::ger<ftn_double_complex>(ftn_int             m,
                                                  ftn_int             lda,
                                                  int                 stream_id)
 {
-    cublas_zgeru(m, n, alpha, x, incx, y, incy, A, lda, stream_id);
+    cublas::zgeru(m, n, (cuDoubleComplex const*)alpha, (cuDoubleComplex*)x, incx, (cuDoubleComplex*)y, incy, (cuDoubleComplex*)A, lda, stream_id);
 }
 
 template <>
@@ -969,9 +1005,67 @@ inline void linalg<GPU>::axpy<ftn_double_complex>(ftn_int n__,
                                                   ftn_double_complex* y__,
                                                   ftn_int incy__)
 {
-    cublas_zaxpy(n__, alpha__, x__, incx__, y__, incy__);
+    cublas::zaxpy(n__, (cuDoubleComplex const*)alpha__, (cuDoubleComplex*)x__, incx__, (cuDoubleComplex*)y__, incy__);
 }
 #endif // __GPU
+
+template <typename T>
+static void check_hermitian(const std::string& name, matrix<T> const& mtrx, int n = -1)
+{
+    assert(mtrx.size(0) == mtrx.size(1));
+
+    double maxdiff = 0.0;
+    int i0 = -1;
+    int j0 = -1;
+
+    if (n == -1) {
+        n = static_cast<int>(mtrx.size(0));
+    }
+
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            double diff = std::abs(mtrx(i, j) - std::conj(mtrx(j, i)));
+            if (diff > maxdiff) {
+                maxdiff = diff;
+                i0 = i;
+                j0 = j;
+            }
+        }
+    }
+
+    if (maxdiff > 1e-10) {
+        std::stringstream s;
+        s << name << " is not a symmetric or hermitian matrix" << std::endl
+          << "  maximum error: i, j : " << i0 << " " << j0 << " diff : " << maxdiff;
+
+        WARNING(s);
+    }
+}
+
+template <typename T>
+static double check_hermitian(dmatrix<T>& mtrx__, int n__)
+{
+    dmatrix<T> tmp(n__, n__, mtrx__.blacs_grid(), mtrx__.bs_row(), mtrx__.bs_col());
+    linalg<CPU>::tranc(n__, n__, mtrx__, 0, 0, tmp, 0, 0);
+
+    //splindex<block_cyclic> spl_r(n__, mtrx__.blacs_grid().num_ranks_row(), mtrx__.blacs_grid().rank_row(), mtrx__.bs_row());
+    //splindex<block_cyclic> spl_c(n__, mtrx__.blacs_grid().num_ranks_col(), mtrx__.blacs_grid().rank_col(), mtrx__.bs_col());
+    //
+    //double max_diff{0};
+    //for (int i = 0; i < spl_c.local_size(); i++) {
+    //    for (int j = 0; j < spl_r.local_size(); j++) {
+    //        max_diff = std::max(max_diff, std::abs(mtrx__(j, i) - tmp(j, i)));
+    //    }
+    //}
+    double max_diff{0};
+    for (int i = 0; i < tmp.num_cols_local(); i++) {
+        for (int j = 0; j < tmp.num_rows_local(); j++) {
+            max_diff = std::max(max_diff, std::abs(mtrx__(j, i) - tmp(j, i)));
+        }
+    }
+    mtrx__.blacs_grid().comm().template allreduce<double, mpi_op_t::max>(&max_diff, 1);
+    return max_diff;
+}
 
 } // namespace sddk
 

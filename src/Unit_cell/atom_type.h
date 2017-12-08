@@ -1,24 +1,24 @@
 // Copyright (c) 2013-2017 Anton Kozhevnikov, Thomas Schulthess
 // All rights reserved.
-// 
-// Redistribution and use in source and binary forms, with or without modification, are permitted provided that 
+//
+// Redistribution and use in source and binary forms, with or without modification, are permitted provided that
 // the following conditions are met:
-// 
-// 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the 
+//
+// 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the
 //    following disclaimer.
-// 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions 
+// 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions
 //    and the following disclaimer in the documentation and/or other materials provided with the distribution.
-// 
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED 
-// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A 
-// PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR 
-// ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, 
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER 
-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR 
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED
+// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+// PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+// ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
 // OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 /** \file atom_type.h
- *   
+ *
  *  \brief Contains definition of sirius::radial_functions_index and sirius::basis_functions_index classes
  *         and declaration and partial implementation of sirius::Atom_type class.
  */
@@ -34,846 +34,1329 @@
 #include "radial_solver.h"
 #include "xc_functional.h"
 #include "simulation_parameters.h"
-
+#include "sht.h"
 namespace sirius {
 
+/// A helper class to establish various index mappings for the atomic radial functions.
 class radial_functions_index
 {
-    private: 
+  private:
+    /// A list of radial function index descriptors.
+    /** This list establishes a mapping \f$ f_{\mu}(r) \leftrightarrow  f_{\ell \nu}(r) \f$ between a
+     *  composite index \f$ \mu \f$ of radial functions and
+     *  corresponding \f$ \ell \nu \f$ indices, where \f$ \ell \f$ is the orbital quantum number and
+     *  \f$ \nu \f$ is the order of radial function for a given \f$ \ell \f$. */
+    std::vector<radial_function_index_descriptor> radial_function_index_descriptors_;
 
-        std::vector<radial_function_index_descriptor> radial_function_index_descriptors_;
+    mdarray<int, 2> index_by_l_order_;
 
-        mdarray<int, 2> index_by_l_order_;
+    mdarray<int, 1> index_by_idxlo_;
 
-        mdarray<int, 1> index_by_idxlo_;
+    /// Number of radial functions for each angular momentum quantum number.
+    std::vector<int> num_rf_;
 
-        /// number of radial functions for each angular momentum quantum number
-        std::vector<int> num_rf_;
+    /// Number of local orbitals for each angular momentum quantum number.
+    std::vector<int> num_lo_;
 
-        /// number of local orbitals for each angular momentum quantum number
-        std::vector<int> num_lo_;
+    // Maximum number of radial functions across all angular momentums.
+    int max_num_rf_;
 
-        // maximum number of radial functions across all angular momentums
-        int max_num_rf_;
+    int lmax_aw_;
 
-        int lmax_aw_;
+    int lmax_lo_;
 
-        int lmax_lo_;
+    int lmax_;
 
-        int lmax_;
+  public:
+    void init(std::vector<local_orbital_descriptor> const& lo_descriptors__)
+    {
+        std::vector<radial_solution_descriptor_set> aw_descriptors;
+        init(aw_descriptors, lo_descriptors__);
+    }
 
-    public:
-
-        void init(std::vector<local_orbital_descriptor> const& lo_descriptors__)
-        {
-            std::vector<radial_solution_descriptor_set> aw_descriptors;
-            init(aw_descriptors, lo_descriptors__);
+    void init(std::vector<radial_solution_descriptor_set> const& aw_descriptors,
+              std::vector<local_orbital_descriptor> const& lo_descriptors)
+    {
+        lmax_aw_ = static_cast<int>(aw_descriptors.size()) - 1;
+        lmax_lo_ = -1;
+        for (size_t idxlo = 0; idxlo < lo_descriptors.size(); idxlo++) {
+            int l    = lo_descriptors[idxlo].l;
+            lmax_lo_ = std::max(lmax_lo_, l);
         }
 
-        void init(std::vector<radial_solution_descriptor_set> const& aw_descriptors, 
-                  std::vector<local_orbital_descriptor>       const& lo_descriptors)
-        {
-            lmax_aw_ = static_cast<int>(aw_descriptors.size()) - 1;
-            lmax_lo_ = -1;
-            for (size_t idxlo = 0; idxlo < lo_descriptors.size(); idxlo++) {
-                int l    = lo_descriptors[idxlo].l;
-                lmax_lo_ = std::max(lmax_lo_, l);
-            }
+        lmax_ = std::max(lmax_aw_, lmax_lo_);
 
-            lmax_ = std::max(lmax_aw_, lmax_lo_);
+        num_rf_ = std::vector<int>(lmax_ + 1, 0);
+        num_lo_ = std::vector<int>(lmax_ + 1, 0);
 
-            num_rf_ = std::vector<int>(lmax_ + 1, 0);
-            num_lo_ = std::vector<int>(lmax_ + 1, 0);
+        max_num_rf_ = 0;
 
-            max_num_rf_ = 0;
+        radial_function_index_descriptors_.clear();
 
-            radial_function_index_descriptors_.clear();
+        for (int l = 0; l <= lmax_aw_; l++) {
+            assert(aw_descriptors[l].size() <= 3);
 
-            for (int l = 0; l <= lmax_aw_; l++) {
-                assert(aw_descriptors[l].size() <= 3);
-
-                for (size_t order = 0; order < aw_descriptors[l].size(); order++) {
-                    radial_function_index_descriptors_.push_back(radial_function_index_descriptor(l, num_rf_[l]));
-                    num_rf_[l]++;
-                }
-            }
-
-            for (int idxlo = 0; idxlo < static_cast<int>(lo_descriptors.size()); idxlo++) {
-                int l = lo_descriptors[idxlo].l;
-                radial_function_index_descriptors_.push_back(radial_function_index_descriptor(l, num_rf_[l], idxlo));
+            for (size_t order = 0; order < aw_descriptors[l].size(); order++) {
+                radial_function_index_descriptors_.push_back(radial_function_index_descriptor(l, num_rf_[l]));
                 num_rf_[l]++;
-                num_lo_[l]++;
-            }
-
-            for (int l = 0; l <= lmax_; l++) {
-                max_num_rf_ = std::max(max_num_rf_, num_rf_[l]);
-            }
-
-            index_by_l_order_ = mdarray<int, 2>(lmax_ + 1, max_num_rf_);
-
-            if (lo_descriptors.size()) {
-                index_by_idxlo_ = mdarray<int, 1>(lo_descriptors.size());
-            }
-
-            for (int i = 0; i < (int)radial_function_index_descriptors_.size(); i++) {
-                int l = radial_function_index_descriptors_[i].l;
-                int order = radial_function_index_descriptors_[i].order;
-                int idxlo = radial_function_index_descriptors_[i].idxlo;
-                index_by_l_order_(l, order) = i;
-                if (idxlo >= 0) index_by_idxlo_(idxlo) = i; 
             }
         }
 
-        inline int size() const
-        {
-            return (int)radial_function_index_descriptors_.size();
+        for (int idxlo = 0; idxlo < static_cast<int>(lo_descriptors.size()); idxlo++) {
+            int l = lo_descriptors[idxlo].l;
+            radial_function_index_descriptors_.push_back(
+                radial_function_index_descriptor(l, lo_descriptors[idxlo].total_angular_momentum, num_rf_[l], idxlo));
+            num_rf_[l]++;
+            num_lo_[l]++;
         }
 
-        inline radial_function_index_descriptor const& operator[](int i) const
-        {
-            assert(i >= 0 && i < (int)radial_function_index_descriptors_.size());
-            return radial_function_index_descriptors_[i];
+        for (int l = 0; l <= lmax_; l++) {
+            max_num_rf_ = std::max(max_num_rf_, num_rf_[l]);
         }
 
-        inline int index_by_l_order(int l, int order) const
-        {
-            return index_by_l_order_(l, order);
+        index_by_l_order_ = mdarray<int, 2>(lmax_ + 1, max_num_rf_);
+
+        if (lo_descriptors.size()) {
+            index_by_idxlo_ = mdarray<int, 1>(lo_descriptors.size());
         }
 
-        inline int index_by_idxlo(int idxlo) const
-        {
-            return index_by_idxlo_(idxlo);
+        for (int i = 0; i < (int)radial_function_index_descriptors_.size(); i++) {
+            int l     = radial_function_index_descriptors_[i].l;
+            int order = radial_function_index_descriptors_[i].order;
+            int idxlo = radial_function_index_descriptors_[i].idxlo;
+            index_by_l_order_(l, order) = i;
+            if (idxlo >= 0)
+                index_by_idxlo_(idxlo) = i;
         }
+    }
 
-        /// Number of radial functions for a given orbital quantum number.
-        inline int num_rf(int l) const
-        {
-            assert(l >= 0 && l < (int)num_rf_.size());
-            return num_rf_[l];
-        }
+    inline int size() const
+    {
+        return (int)radial_function_index_descriptors_.size();
+    }
 
-        /// Number of local orbitals for a given orbital quantum number.
-        inline int num_lo(int l) const
-        {
-            assert(l >= 0 && l < (int)num_lo_.size());
-            return num_lo_[l];
-        }
+    inline radial_function_index_descriptor const& operator[](int i) const
+    {
+        assert(i >= 0 && i < (int)radial_function_index_descriptors_.size());
+        return radial_function_index_descriptors_[i];
+    }
 
-        /// Maximum possible number of radial functions for an orbital quantum number.
-        inline int max_num_rf() const
-        {
-            return max_num_rf_;
-        }
+    inline int index_by_l_order(int l, int order) const
+    {
+        return index_by_l_order_(l, order);
+    }
 
-        inline int lmax() const
-        {
-            return lmax_;
-        }
+    inline int index_by_idxlo(int idxlo) const
+    {
+        return index_by_idxlo_(idxlo);
+    }
 
-        inline int lmax_lo() const
-        {
-            return lmax_lo_;
-        }
+    /// Number of radial functions for a given orbital quantum number.
+    inline int num_rf(int l) const
+    {
+        assert(l >= 0 && l < (int)num_rf_.size());
+        return num_rf_[l];
+    }
+
+    /// Number of local orbitals for a given orbital quantum number.
+    inline int num_lo(int l) const
+    {
+        assert(l >= 0 && l < (int)num_lo_.size());
+        return num_lo_[l];
+    }
+
+    /// Maximum possible number of radial functions for an orbital quantum number.
+    inline int max_num_rf() const
+    {
+        return max_num_rf_;
+    }
+
+    inline int lmax() const
+    {
+        return lmax_;
+    }
+
+    inline int lmax_lo() const
+    {
+        return lmax_lo_;
+    }
 };
 
 class basis_functions_index
 {
-    private:
+  private:
+    std::vector<basis_function_index_descriptor> basis_function_index_descriptors_;
 
-        std::vector<basis_function_index_descriptor> basis_function_index_descriptors_; 
+    mdarray<int, 2> index_by_lm_order_;
 
-        mdarray<int, 2> index_by_lm_order_;
+    mdarray<int, 1> index_by_idxrf_;
 
-        mdarray<int, 1> index_by_idxrf_;
+    /// number of augmented wave basis functions
+    int size_aw_;
 
-        /// number of augmented wave basis functions
-        int size_aw_;
+    /// number of local orbital basis functions
+    int size_lo_;
 
-        /// number of local orbital basis functions
-        int size_lo_;
+  public:
+    basis_functions_index()
+        : size_aw_(0)
+        , size_lo_(0)
+    {
+    }
 
-    public:
+    void init(radial_functions_index& indexr)
+    {
+        basis_function_index_descriptors_.clear();
 
-        basis_functions_index() : size_aw_(0), size_lo_(0)
-        {
+        index_by_idxrf_ = mdarray<int, 1>(indexr.size());
+
+        for (int idxrf = 0; idxrf < indexr.size(); idxrf++) {
+            int l     = indexr[idxrf].l;
+            int order = indexr[idxrf].order;
+            int idxlo = indexr[idxrf].idxlo;
+
+            index_by_idxrf_(idxrf) = (int)basis_function_index_descriptors_.size();
+
+            for (int m = -l; m <= l; m++)
+                basis_function_index_descriptors_.push_back(
+                    basis_function_index_descriptor(l, m, indexr[idxrf].j, order, idxlo, idxrf));
+        }
+        index_by_lm_order_ = mdarray<int, 2>(Utils::lmmax(indexr.lmax()), indexr.max_num_rf());
+
+        for (int i = 0; i < (int)basis_function_index_descriptors_.size(); i++) {
+            int lm    = basis_function_index_descriptors_[i].lm;
+            int order = basis_function_index_descriptors_[i].order;
+            index_by_lm_order_(lm, order) = i;
+
+            // get number of aw basis functions
+            if (basis_function_index_descriptors_[i].idxlo < 0)
+                size_aw_ = i + 1;
         }
 
-        void init(radial_functions_index& indexr)
-        {
-            basis_function_index_descriptors_.clear();
+        size_lo_ = (int)basis_function_index_descriptors_.size() - size_aw_;
 
-            index_by_idxrf_ = mdarray<int, 1>(indexr.size());
+        assert(size_aw_ >= 0);
+        assert(size_lo_ >= 0);
+    }
 
-            for (int idxrf = 0; idxrf < indexr.size(); idxrf++)
-            {
-                int l = indexr[idxrf].l;
-                int order = indexr[idxrf].order;
-                int idxlo = indexr[idxrf].idxlo;
+    /// Return total number of MT basis functions.
+    inline int size() const
+    {
+        return static_cast<int>(basis_function_index_descriptors_.size());
+    }
 
-                index_by_idxrf_(idxrf) = (int)basis_function_index_descriptors_.size();
+    inline int size_aw() const
+    {
+        return size_aw_;
+    }
 
-                for (int m = -l; m <= l; m++)
-                    basis_function_index_descriptors_.push_back(basis_function_index_descriptor(l, m, order, idxlo, idxrf));
-            }
+    inline int size_lo() const
+    {
+        return size_lo_;
+    }
 
-            index_by_lm_order_ = mdarray<int, 2>(Utils::lmmax(indexr.lmax()), indexr.max_num_rf());
+    inline int index_by_l_m_order(int l, int m, int order) const
+    {
+        return index_by_lm_order_(Utils::lm_by_l_m(l, m), order);
+    }
 
-            for (int i = 0; i < (int)basis_function_index_descriptors_.size(); i++)
-            {
-                int lm = basis_function_index_descriptors_[i].lm;
-                int order = basis_function_index_descriptors_[i].order;
-                index_by_lm_order_(lm, order) = i;
+    inline int index_by_lm_order(int lm, int order) const
+    {
+        return index_by_lm_order_(lm, order);
+    }
 
-                // get number of aw basis functions
-                if (basis_function_index_descriptors_[i].idxlo < 0) size_aw_ = i + 1;
-            }
+    inline int index_by_idxrf(int idxrf) const
+    {
+        return index_by_idxrf_(idxrf);
+    }
 
-            size_lo_ = (int)basis_function_index_descriptors_.size() - size_aw_;
-
-            assert(size_aw_ >= 0);
-            assert(size_lo_ >= 0);
-        } 
-
-        /// Return total number of MT basis functions.
-        inline int size() const
-        {
-            return static_cast<int>(basis_function_index_descriptors_.size());
-        }
-
-        inline int size_aw() const
-        {
-            return size_aw_;
-        }
-
-        inline int size_lo() const
-        {
-            return size_lo_;
-        }
-
-        inline int index_by_l_m_order(int l, int m, int order) const
-        {
-            return index_by_lm_order_(Utils::lm_by_l_m(l, m), order);
-        }
-
-        inline int index_by_lm_order(int lm, int order) const
-        {
-            return index_by_lm_order_(lm, order);
-        }
-
-        inline int index_by_idxrf(int idxrf) const
-        {
-            return index_by_idxrf_(idxrf);
-        }
-
-        inline basis_function_index_descriptor const& operator[](int i) const
-        {
-            assert(i >= 0 && i < (int)basis_function_index_descriptors_.size());
-            return basis_function_index_descriptors_[i];
-        }
+    inline basis_function_index_descriptor const& operator[](int i) const
+    {
+        assert(i >= 0 && i < (int)basis_function_index_descriptors_.size());
+        return basis_function_index_descriptors_[i];
+    }
 };
 
 class Atom_type
 {
-    private:
+  private:
+    Simulation_parameters const& parameters_;
 
-        Simulation_parameters const& parameters_;
+    /// Unique id of atom type in the range [0, \f$ N_{types} \f$).
+    int id_{-1};
 
-        /// Unique id of atom type in the range [0, \f$ N_{types} \f$).
-        int id_{-1};
+    /// Unique string label for the atom type.
+    std::string label_;
 
-        /// Unique string label for the atom type.
-        std::string label_;
+    /// Chemical element symbol.
+    std::string symbol_;
 
-        /// Chemical element symbol.
-        std::string symbol_;
+    /// Chemical element name.
+    std::string name_;
 
-        /// Chemical element name.
-        std::string name_;
+    /// Nucleus charge, treated as positive(!) integer.
+    int zn_{0};
 
-        /// Nucleus charge, treated as positive(!) integer.
-        int zn_{0};
+    /// Atom mass.
+    double mass_{0};
 
-        /// Atom mass.
-        double mass_{0};
+    /// Muffin-tin radius.
+    double mt_radius_{0};
 
-        /// Muffin-tin radius.
-        double mt_radius_{0};
+    /// Number of muffin-tin points.
+    int num_mt_points_{0};
 
-        /// Number of muffin-tin points.
-        int num_mt_points_{0};
+    /// Beginning of the radial grid.
+    double radial_grid_origin_{0};
 
-        /// Beginning of the radial grid.
-        double radial_grid_origin_{0};
+    /// List of atomic levels.
+    std::vector<atomic_level_descriptor> atomic_levels_;
 
-        /// List of atomic levels.
-        std::vector<atomic_level_descriptor> atomic_levels_;
+    /// Number of core electrons.
+    double num_core_electrons_{0};
 
-        /// Number of core electrons.
-        double num_core_electrons_{0};
+    /// Number of valence electrons.
+    double num_valence_electrons_{0};
 
-        /// Number of valence electrons.
-        double num_valence_electrons_{0};
+    /// Default augmented wave configuration.
+    radial_solution_descriptor_set aw_default_l_;
 
-        /// Default augmented wave configuration.
-        radial_solution_descriptor_set aw_default_l_;
+    /// augmented wave configuration for specific l
+    std::vector<radial_solution_descriptor_set> aw_specific_l_;
 
-        /// augmented wave configuration for specific l
-        std::vector<radial_solution_descriptor_set> aw_specific_l_;
+    /// list of radial descriptor sets used to construct augmented waves
+    std::vector<radial_solution_descriptor_set> aw_descriptors_;
 
-        /// list of radial descriptor sets used to construct augmented waves 
-        std::vector<radial_solution_descriptor_set> aw_descriptors_;
+    /// list of radial descriptor sets used to construct local orbitals
+    std::vector<local_orbital_descriptor> lo_descriptors_;
 
-        /// list of radial descriptor sets used to construct local orbitals
-        std::vector<local_orbital_descriptor> lo_descriptors_;
+    /// Maximum number of AW radial functions across angular momentums.
+    int max_aw_order_{0};
 
-        /// Maximum number of AW radial functions across angular momentums.
-        int max_aw_order_{0};
+    int offset_lo_{-1};
 
-        int offset_lo_{-1};
+    radial_functions_index indexr_;
 
-        radial_functions_index indexr_;
-        
-        basis_functions_index indexb_;
+    basis_functions_index indexb_;
 
-        pseudopotential_descriptor pp_desc_;
+    pseudopotential_descriptor pp_desc_;
 
-        /// Inverse of (Q_{\xi \xi'j}^{-1} + beta_pw^{H}_{\xi} * beta_pw_{xi'})
-        /** Used in Chebyshev iterative solver as a block-diagonal preconditioner */
-        matrix<double_complex> p_mtrx_;
+    /// starting magnetization
+    double starting_magnetization_{0.0};
 
-        std::vector<int> atom_id_;
+    // direction of the starting magnetization
+    double starting_magnetization_theta_{0.0};
+    double starting_magnetization_phi_{0.0};
 
-        std::string file_name_;
+    /// Hubbard correction
+    bool hubbard_correction_{false};
 
-        mdarray<int, 2> idx_radial_integrals_;
+    /// hubbard angular momentum s, p, d, f
+    int hubbard_l_{-1};
 
-        mutable mdarray<double, 3> rf_coef_;
-        mutable mdarray<double, 3> vrf_coef_;
+    /// hubbard orbital
+    int hubbard_n_{0};
 
-        mdarray<Spline<double>, 1> beta_rf_;
-        mdarray<Spline<double>, 2> q_rf_;
+    // hubbard occupancy
+    double hubbard_occupancy_orbital_;
 
-        bool initialized_{false};
-       
-        inline void read_input_core(json const& parser);
+    /// different hubbard coefficients
+    //  s: U = hubbard_coefficients_[0]
+    //  p: U = hubbard_coefficients_[0], J = hubbard_coefficients_[1]
+    //  d: U = hubbard_coefficients_[0], J = hubbard_coefficients_[1],  B  = hubbard_coefficients_[2]
+    //  f: U = hubbard_coefficients_[0], J = hubbard_coefficients_[1],  E2 = hubbard_coefficients_[2], E3 = hubbard_coefficients_[3]
+    ///   hubbard_coefficients[4] = U_alpha
+    ///   hubbard_coefficients[5] = U_beta
 
-        inline void read_input_aw(json const& parser);
+    double hubbard_coefficients_[4];
 
-        inline void read_input_lo(json const& parser);
+    mdarray<double, 4> hubbard_matrix_;
 
-        inline void read_pseudo_uspp(json const& parser);
+    // simplifed hubbard theory
+    double hubbard_alpha_{0.0};
+    double hubbard_beta_{0.0};
+    double hubbard_J0_{0.0};
 
-        inline void read_pseudo_paw(json const& parser);
+    /// Inverse of (Q_{\xi \xi'j}^{-1} + beta_pw^{H}_{\xi} * beta_pw_{xi'})
+    /** Used in Chebyshev iterative solver as a block-diagonal preconditioner */
+    matrix<double_complex> p_mtrx_;
 
-        inline void read_input(const std::string& fname);
-    
-        inline void init_aw_descriptors(int lmax)
-        {
-            assert(lmax >= -1);
+    /// f_coefficients defined in Ref. PRB 71 115106 Eq.9 only
+    /// valid when SO interactions are on
+    mdarray<double_complex, 4> f_coefficients_;
 
-            if (lmax >= 0 && aw_default_l_.size() == 0) {
-                TERMINATE("default AW descriptor is empty"); 
+    std::vector<int> atom_id_;
+
+    std::string file_name_;
+
+    mdarray<int, 2> idx_radial_integrals_;
+
+    mutable mdarray<double, 3> rf_coef_;
+    mutable mdarray<double, 3> vrf_coef_;
+
+    mdarray<Spline<double>, 1> beta_rf_;
+    mdarray<Spline<double>, 2> q_rf_;
+
+    bool initialized_{false};
+
+    inline void read_hubbard_parameters(json const& parser);
+
+    inline void read_input_core(json const& parser);
+
+    inline void read_input_aw(json const& parser);
+
+    inline void read_input_lo(json const& parser);
+
+    inline void read_pseudo_uspp(json const& parser);
+
+    inline void read_pseudo_paw(json const& parser);
+
+    inline void read_input(const std::string& fname);
+
+    inline void init_aw_descriptors(int lmax)
+    {
+        assert(lmax >= -1);
+
+        if (lmax >= 0 && aw_default_l_.size() == 0) {
+            TERMINATE("default AW descriptor is empty");
+        }
+
+        aw_descriptors_.clear();
+        for (int l = 0; l <= lmax; l++) {
+            aw_descriptors_.push_back(aw_default_l_);
+            for (size_t ord = 0; ord < aw_descriptors_[l].size(); ord++) {
+                aw_descriptors_[l][ord].n = l + 1;
+                aw_descriptors_[l][ord].l = l;
             }
+        }
 
-            aw_descriptors_.clear();
-            for (int l = 0; l <= lmax; l++) {
-                aw_descriptors_.push_back(aw_default_l_);
-                for (size_t ord = 0; ord < aw_descriptors_[l].size(); ord++) {
-                    aw_descriptors_[l][ord].n = l + 1;
-                    aw_descriptors_[l][ord].l = l;
+        for (size_t i = 0; i < aw_specific_l_.size(); i++) {
+            int l = aw_specific_l_[i][0].l;
+            if (l < lmax) {
+                aw_descriptors_[l] = aw_specific_l_[i];
+            }
+        }
+    }
+
+    /* forbid copy constructor */
+    Atom_type(const Atom_type& src) = delete;
+
+    /* forbid assignment operator */
+    Atom_type& operator=(const Atom_type& src) = delete;
+
+  protected:
+    /// Radial grid.
+    Radial_grid<double> radial_grid_;
+
+    /// Density of a free atom.
+    Spline<double> free_atom_density_spline_;
+
+    std::vector<double> free_atom_density_;
+
+    /// Radial grid of a free atom.
+    Radial_grid<double> free_atom_radial_grid_;
+
+  public:
+    Atom_type(Simulation_parameters const& parameters__,
+              std::string symbol__,
+              std::string name__,
+              int zn__,
+              double mass__,
+              std::vector<atomic_level_descriptor>& levels__,
+              radial_grid_t grid_type__)
+        : parameters_(parameters__)
+        , symbol_(symbol__)
+        , name_(name__)
+        , zn_(zn__)
+        , mass_(mass__)
+        , mt_radius_(2.0)
+        , num_mt_points_(2000 + zn__ * 50)
+        , atomic_levels_(levels__)
+    {
+        radial_grid_ = Radial_grid_factory<double>(grid_type__, num_mt_points_, 1e-6 / zn_, 20.0 + 0.25 * zn_);
+    }
+
+    Atom_type(Simulation_parameters const& parameters__, int id__, std::string label__, std::string file_name__)
+        : parameters_(parameters__)
+        , id_(id__)
+        , label_(label__)
+        , file_name_(file_name__)
+    {
+    }
+
+    Atom_type(Atom_type&& src) = default;
+
+    inline void init(int offset_lo__);
+
+    inline void set_radial_grid(int num_points__ = -1, double const* points__ = nullptr)
+    {
+        if (num_mt_points_ == 0) {
+            TERMINATE("number of muffin-tin points is zero");
+        }
+        if (num_points__ < 0 && points__ == nullptr) {
+            /* create default exponential grid */
+            radial_grid_ = Radial_grid_exp<double>(num_mt_points_, radial_grid_origin_, mt_radius_);
+        } else {
+            assert(num_points__ == num_mt_points_);
+            radial_grid_ = Radial_grid_ext<double>(num_points__, points__);
+        }
+        if (parameters_.processing_unit() == GPU) {
+#ifdef __GPU
+            radial_grid_.copy_to_device();
+#endif
+        }
+    }
+
+    /// Add augmented-wave descriptor.
+    inline void add_aw_descriptor(int n, int l, double enu, int dme, int auto_enu)
+    {
+        if ((int)aw_descriptors_.size() < (l + 1)) {
+            aw_descriptors_.resize(l + 1, radial_solution_descriptor_set());
+        }
+
+        radial_solution_descriptor rsd;
+
+        rsd.n = n;
+        if (n == -1) {
+            /* default principal quantum number value for any l */
+            rsd.n = l + 1;
+            for (int ist = 0; ist < num_atomic_levels(); ist++) {
+                /* take next level after the core */
+                if (atomic_level(ist).core && atomic_level(ist).l == l) {
+                    rsd.n = atomic_level(ist).n + 1;
                 }
             }
-
-            for (size_t i = 0; i < aw_specific_l_.size(); i++) {
-                int l = aw_specific_l_[i][0].l;
-                if (l < lmax) {
-                    aw_descriptors_[l] = aw_specific_l_[i];
-                }
-            }
-        }
-    
-        /* forbid copy constructor */
-        Atom_type(const Atom_type& src) = delete;
-        
-        /* forbid assignment operator */
-        Atom_type& operator=(const Atom_type& src) = delete;
-        
-    protected:
-
-        /// Radial grid.
-        Radial_grid<double> radial_grid_;
-
-        /// Density of a free atom.
-        Spline<double> free_atom_density_spline_;
-
-        std::vector<double> free_atom_density_;
-
-        /// Radial grid of a free atom.
-        Radial_grid<double> free_atom_radial_grid_;
-
-    public:
-        
-        Atom_type(Simulation_parameters const&          parameters__,
-                  std::string                           symbol__, 
-                  std::string                           name__, 
-                  int                                   zn__, 
-                  double                                mass__, 
-                  std::vector<atomic_level_descriptor>& levels__,
-                  radial_grid_t                         grid_type__)
-            : parameters_(parameters__)
-            , symbol_(symbol__)
-            , name_(name__)
-            , zn_(zn__)
-            , mass_(mass__)
-            , mt_radius_(2.0)
-            , num_mt_points_(2000 + zn__ * 50)
-            , atomic_levels_(levels__)
-        {
-            radial_grid_ = Radial_grid_factory<double>(grid_type__, num_mt_points_, 1e-6 / zn_, 20.0 + 0.25 * zn_);
-        }
- 
-        Atom_type(Simulation_parameters const& parameters__,
-                  int                          id__, 
-                  std::string                  label__, 
-                  std::string                  file_name__)
-            : parameters_(parameters__)
-            , id_(id__)
-            , label_(label__)
-            , file_name_(file_name__)
-        {
         }
 
-        Atom_type(Atom_type&& src) = default;
+        rsd.l        = l;
+        rsd.dme      = dme;
+        rsd.enu      = enu;
+        rsd.auto_enu = auto_enu;
+        aw_descriptors_[l].push_back(rsd);
+    }
 
-        inline void init(int offset_lo__);
-
-        inline void set_radial_grid(int num_points__ = -1, double const* points__ = nullptr)
-        {
-            if (num_mt_points_ == 0) {
-                TERMINATE("number of muffin-tin points is zero");
-            }
-            if (num_points__ < 0 && points__ == nullptr) {
-                /* create default exponential grid */
-                radial_grid_ = Radial_grid_exp<double>(num_mt_points_, radial_grid_origin_, mt_radius_); 
-            } else {
-                assert(num_points__ == num_mt_points_);
-                radial_grid_ = Radial_grid_ext<double>(num_points__, points__);
-            }
-            if (parameters_.processing_unit() == GPU) {
-                #ifdef __GPU
-                radial_grid_.copy_to_device();
-                #endif
+    /// Add local orbital descriptor
+    inline void add_lo_descriptor(int ilo, int n, int l, double enu, int dme, int auto_enu)
+    {
+        if ((int)lo_descriptors_.size() == ilo) {
+            lo_descriptors_.push_back(local_orbital_descriptor());
+            lo_descriptors_[ilo].l = l;
+        } else {
+            if (l != lo_descriptors_[ilo].l) {
+                std::stringstream s;
+                s << "wrong angular quantum number" << std::endl
+                  << "atom type id: " << id() << " (" << symbol_ << ")" << std::endl
+                  << "idxlo: " << ilo << std::endl
+                  << "n: " << l << std::endl
+                  << "l: " << n << std::endl
+                  << "expected l: " << lo_descriptors_[ilo].l << std::endl;
+                TERMINATE(s);
             }
         }
 
-        /// Add augmented-wave descriptor.
-        inline void add_aw_descriptor(int n, int l, double enu, int dme, int auto_enu)
-        {
-            if ((int)aw_descriptors_.size() < (l + 1)) {
-                aw_descriptors_.resize(l + 1, radial_solution_descriptor_set());
-            }
-            
-            radial_solution_descriptor rsd;
-            
-            rsd.n = n;
-            if (n == -1) {
-                /* default principal quantum number value for any l */
-                rsd.n = l + 1;
-                for (int ist = 0; ist < num_atomic_levels(); ist++) {
+        radial_solution_descriptor rsd;
+
+        rsd.n = n;
+        if (n == -1) {
+            /* default value for any l */
+            rsd.n = l + 1;
+            for (int ist = 0; ist < num_atomic_levels(); ist++) {
+                if (atomic_level(ist).core && atomic_level(ist).l == l) {
                     /* take next level after the core */
-                    if (atomic_level(ist).core && atomic_level(ist).l == l) {
-                        rsd.n = atomic_level(ist).n + 1;
-                    }
+                    rsd.n = atomic_level(ist).n + 1;
                 }
             }
-            
-            rsd.l = l;
-            rsd.dme = dme;
-            rsd.enu = enu;
-            rsd.auto_enu = auto_enu;
-            aw_descriptors_[l].push_back(rsd);
         }
 
-        /// Add local orbital descriptor
-        inline void add_lo_descriptor(int ilo, int n, int l, double enu, int dme, int auto_enu)
-        {
-            if ((int)lo_descriptors_.size() == ilo) {
-                lo_descriptors_.push_back(local_orbital_descriptor());
-                lo_descriptors_[ilo].l = l;
-            } else {
-                if (l != lo_descriptors_[ilo].l) {
-                    std::stringstream s;
-                    s << "wrong angular quantum number" << std::endl
-                      << "atom type id: " << id() << " (" << symbol_ << ")" << std::endl
-                      << "idxlo: " << ilo << std::endl
-                      << "n: " << l << std::endl
-                      << "l: " << n << std::endl
-                      << "expected l: " <<  lo_descriptors_[ilo].l << std::endl;
-                    TERMINATE(s);
-                }
+        rsd.l        = l;
+        rsd.dme      = dme;
+        rsd.enu      = enu;
+        rsd.auto_enu = auto_enu;
+        lo_descriptors_[ilo].rsd_set.push_back(rsd);
+    }
+
+    inline void add_lo_descriptor(local_orbital_descriptor const& lod__)
+    {
+        lo_descriptors_.push_back(lod__);
+    }
+
+    inline void init_free_atom(bool smooth);
+
+    inline void print_info() const;
+
+    inline int id() const
+    {
+        return id_;
+    }
+
+    inline int zn() const
+    {
+        assert(zn_ > 0);
+        return zn_;
+    }
+
+    inline std::string const& symbol() const
+    {
+        return symbol_;
+    }
+
+    inline std::string const& name() const
+    {
+        return name_;
+    }
+
+    inline double mass() const
+    {
+        return mass_;
+    }
+
+    inline double mt_radius() const
+    {
+        return mt_radius_;
+    }
+
+    inline int num_mt_points() const
+    {
+        assert(num_mt_points_ > 0);
+        return num_mt_points_;
+    }
+
+    inline Radial_grid<double> const& radial_grid() const
+    {
+        assert(num_mt_points_ > 0);
+        assert(radial_grid_.num_points() > 0);
+        return radial_grid_;
+    }
+
+    inline Radial_grid<double> const& free_atom_radial_grid() const
+    {
+        return free_atom_radial_grid_;
+    }
+
+    inline double radial_grid(int ir) const
+    {
+        return radial_grid_[ir];
+    }
+
+    inline double free_atom_radial_grid(int ir) const
+    {
+        return free_atom_radial_grid_[ir];
+    }
+
+    inline int num_atomic_levels() const
+    {
+        return static_cast<int>(atomic_levels_.size());
+    }
+
+    inline atomic_level_descriptor const& atomic_level(int idx) const
+    {
+        return atomic_levels_[idx];
+    }
+
+    inline double num_core_electrons() const
+    {
+        return num_core_electrons_;
+    }
+
+    inline double num_valence_electrons() const
+    {
+        return num_valence_electrons_;
+    }
+
+    inline double free_atom_density(const int idx) const
+    {
+        return free_atom_density_spline_[idx];
+    }
+
+    inline double free_atom_density(double x) const
+    {
+        return free_atom_density_spline_(x);
+    }
+
+    inline int num_aw_descriptors() const
+    {
+        return static_cast<int>(aw_descriptors_.size());
+    }
+
+    inline radial_solution_descriptor_set const& aw_descriptor(int l) const
+    {
+        assert(l < (int)aw_descriptors_.size());
+        return aw_descriptors_[l];
+    }
+
+    inline int num_lo_descriptors() const
+    {
+        return (int)lo_descriptors_.size();
+    }
+
+    inline local_orbital_descriptor const& lo_descriptor(int idx) const
+    {
+        return lo_descriptors_[idx];
+    }
+
+    inline int max_aw_order() const
+    {
+        return max_aw_order_;
+    }
+
+    /// Order of augmented wave radial functions for a given l.
+    inline int aw_order(int l__) const
+    {
+        return static_cast<int>(aw_descriptor(l__).size());
+    }
+
+    inline radial_functions_index const& indexr() const
+    {
+        return indexr_;
+    }
+
+    inline radial_function_index_descriptor const& indexr(int i) const
+    {
+        assert(i >= 0 && i < (int)indexr_.size());
+        return indexr_[i];
+    }
+
+    inline int indexr_by_l_order(int l, int order) const
+    {
+        return indexr_.index_by_l_order(l, order);
+    }
+
+    inline int indexr_by_idxlo(int idxlo) const
+    {
+        return indexr_.index_by_idxlo(idxlo);
+    }
+
+    inline basis_functions_index const& indexb() const
+    {
+        return indexb_;
+    }
+
+    inline basis_function_index_descriptor const& indexb(int i) const
+    {
+        assert(i >= 0 && i < (int)indexb_.size());
+        return indexb_[i];
+    }
+
+    inline int indexb_by_l_m_order(int l, int m, int order) const
+    {
+        return indexb_.index_by_l_m_order(l, m, order);
+    }
+
+    inline int indexb_by_lm_order(int lm, int order) const
+    {
+        return indexb_.index_by_lm_order(lm, order);
+    }
+
+    inline int mt_aw_basis_size() const
+    {
+        return indexb_.size_aw();
+    }
+
+    inline int mt_lo_basis_size() const
+    {
+        return indexb_.size_lo();
+    }
+
+    inline int mt_basis_size() const
+    {
+        return indexb_.size();
+    }
+
+    inline int mt_radial_basis_size() const
+    {
+        return indexr_.size();
+    }
+
+    /// Return index of a free atom grid point close to the muffin-tin radius.
+    inline int idx_rmt_free_atom() const
+    {
+        for (int i = 0; i < free_atom_radial_grid().num_points(); i++) {
+            if (free_atom_radial_grid(i) > mt_radius())
+                return i - 1;
+        }
+        return -1;
+    }
+
+    inline pseudopotential_descriptor const& pp_desc() const
+    {
+        return pp_desc_;
+    }
+
+    inline pseudopotential_descriptor& pp_desc()
+    {
+        return pp_desc_;
+    }
+
+    inline void set_symbol(const std::string symbol__)
+    {
+        symbol_ = symbol__;
+    }
+
+    inline void set_zn(int zn__)
+    {
+        zn_ = zn__;
+    }
+
+    inline void set_mass(double mass__)
+    {
+        mass_ = mass__;
+    }
+
+    inline void
+    set_mt_radius(double mt_radius__) // TODO: this can cause inconsistency with radial_grid; remove this method
+                                      // mt_radius should always be the last point of radial_grid
+    {
+        mt_radius_ = mt_radius__;
+    }
+
+    inline void set_num_mt_points(int num_mt_points__)
+    {
+        num_mt_points_ = num_mt_points__;
+    }
+
+    inline void set_radial_grid_origin(double radial_grid_origin__)
+    {
+        radial_grid_origin_ = radial_grid_origin__;
+    }
+
+    inline void set_configuration(int n, int l, int k, double occupancy, bool core)
+    {
+        atomic_level_descriptor level;
+        level.n         = n;
+        level.l         = l;
+        level.k         = k;
+        level.occupancy = occupancy;
+        level.core      = core;
+        atomic_levels_.push_back(level);
+    }
+
+    /// Return number of atoms of a given type.
+    inline int num_atoms() const
+    {
+        return static_cast<int>(atom_id_.size());
+    }
+
+    inline int atom_id(int idx) const
+    {
+        return atom_id_[idx];
+    }
+
+    inline void add_atom_id(int atom_id__)
+    {
+        atom_id_.push_back(atom_id__);
+    }
+
+    inline bool initialized() const
+    {
+        return initialized_;
+    }
+
+    inline std::string const& label() const
+    {
+        return label_;
+    }
+
+    inline std::string const& file_name() const
+    {
+        return file_name_;
+    }
+
+    inline int offset_lo() const
+    {
+        assert(offset_lo_ >= 0);
+        return offset_lo_;
+    }
+
+    inline void set_d_mtrx_ion(matrix<double>& d_mtrx_ion__)
+    {
+        pp_desc_.d_mtrx_ion = matrix<double>(d_mtrx_ion__.size(0), d_mtrx_ion__.size(1));
+        d_mtrx_ion__ >> pp_desc_.d_mtrx_ion;
+    }
+
+    inline mdarray<int, 2> const& idx_radial_integrals() const
+    {
+        return idx_radial_integrals_;
+    }
+
+    inline mdarray<double, 3>& rf_coef() const
+    {
+        return rf_coef_;
+    }
+
+    inline mdarray<double, 3>& vrf_coef() const
+    {
+        return vrf_coef_;
+    }
+
+    inline Simulation_parameters const& parameters() const
+    {
+        return parameters_;
+    }
+
+    inline void set_free_atom_radial_grid(int num_points__, double const* points__)
+    {
+        if (num_points__ <= 0) {
+            TERMINATE("wrong number of radial points");
+        }
+        free_atom_radial_grid_ = Radial_grid_ext<double>(num_points__, points__);
+    }
+
+    inline void set_free_atom_density(int num_points__, double const* dens__)
+    {
+        free_atom_density_.resize(num_points__);
+        std::memcpy(free_atom_density_.data(), dens__, num_points__ * sizeof(double));
+    }
+
+    inline double_complex f_coefficients(int xi1, int xi2, int s1, int s2) const
+    {
+        return f_coefficients_(xi1, xi2, s1, s2);
+    }
+    inline Spline<double> const& beta_rf(int idxrf__) const
+    {
+        return beta_rf_[idxrf__];
+    }
+
+    inline Spline<double> const& q_rf(int idx__, int l__) const
+    {
+        return q_rf_(idx__, l__);
+    }
+    bool const& hubbard_correction() const
+    {
+        return hubbard_correction_;
+    }
+
+    inline double Hubbard_J0() const
+    {
+        return hubbard_J0_;
+    }
+
+    inline double Hubbard_U() const
+    {
+        return hubbard_coefficients_[0];
+    }
+
+    inline double Hubbard_J() const
+    {
+        return hubbard_coefficients_[1];
+    }
+
+    inline double Hubbard_U_minus_J() const
+    {
+        return Hubbard_U() - Hubbard_J();
+    }
+
+    inline double Hubbard_B() const
+    {
+        return hubbard_coefficients_[2];
+    }
+
+    inline double Hubbard_E2() const
+    {
+        return hubbard_coefficients_[2];
+    }
+
+    inline double Hubbard_E3() const
+    {
+        return hubbard_coefficients_[3];
+    }
+
+    inline double Hubbard_alpha() const
+    {
+        return hubbard_alpha_;
+    }
+
+    inline double Hubbard_beta() const
+    {
+        return hubbard_beta_;
+    }
+
+    inline void set_hubbard_alpha(const double alpha)
+    {
+        hubbard_alpha_ = alpha;
+    }
+
+    inline void set_hubbard_beta(const double beta_)
+    {
+        hubbard_beta_ = beta_;
+    }
+
+    inline void set_starting_magnetization_theta(const double theta_)
+    {
+        starting_magnetization_theta_ = theta_;
+    }
+
+    inline void set_starting_magnetization_phi(const double phi_)
+    {
+        starting_magnetization_phi_ = phi_;;
+    }
+
+    inline void set_hubbard_coefficients(double const * J_)
+    {
+        this->hubbard_coefficients_[0] = J_[0];
+        this->hubbard_coefficients_[1] = J_[1];
+        this->hubbard_coefficients_[2] = J_[2];
+        this->hubbard_coefficients_[3] = J_[3];
+    }
+
+    inline void set_hubbard_J0(double const J0_)
+    {
+        this->hubbard_J0_ = J0_;
+    }
+
+    inline void set_hubbard_correction(const int co_)
+    {
+        if(co_ > 0)
+            this->hubbard_correction_ = true;
+        else
+            this->hubbard_correction_ = false;
+    }
+
+    inline int hubbard_l() const
+    {
+        return hubbard_l_;
+    }
+
+    inline double starting_magnetization_theta() const
+    {
+        return starting_magnetization_theta_;
+    }
+
+    inline double starting_magnetization_phi() const
+    {
+        return starting_magnetization_phi_;
+    }
+
+    inline double starting_magnetization() const
+    {
+        return starting_magnetization_;
+    }
+
+    inline int hubbard_n() const
+    {
+        return hubbard_n_;
+    }
+
+    inline double hubbard_matrix(const int m1, const int m2, const int m3, const int m4) const
+    {
+        return hubbard_matrix_(m1, m2, m3, m4);
+    }
+
+    inline double& hubbard_matrix(const int m1, const int m2, const int m3, const int m4)
+    {
+        return hubbard_matrix_(m1, m2, m3, m4);
+    }
+
+    void hubbard_F_coefficients(double *F)
+    {
+        F[0] = Hubbard_U();
+
+        switch(hubbard_l_) {
+        case 1:
+            F[1] = 5.0 * Hubbard_J();
+            break;
+        case 2:
+            F[1] = 5.0 * Hubbard_J() + 31.5 * Hubbard_B();
+            F[2] = 9.0 * Hubbard_J() - 31.5 * Hubbard_B();
+            break;
+        case 3:
+            F[1] = (225.0 / 54.0) * Hubbard_J()     + (32175.0 / 42.0) * Hubbard_E2()   + (2475.0 / 42.0) * Hubbard_E3();
+            F[2] = 11.0 * Hubbard_J()            - (141570.0 / 77.0) * Hubbard_E2()  + (4356.0 / 77.0) * Hubbard_E3();
+            F[3] = (7361.640 / 594.0) * Hubbard_J() + (36808.20 / 66.0) * Hubbard_E2()  - 111.54 * Hubbard_E3();
+            break;
+        default:
+            printf("%d\n", hubbard_l_);
+            TERMINATE("Hubbard correction not implemented for l > 3");
+            break;
+        }
+
+        printf("U = %.5lf\n", Hubbard_U());
+        printf("F[0] = %.5lf\n", F[0]);
+        printf("F[1] = %.5lf\n", F[1]);
+        printf("F[2] = %.5lf\n", F[2]);
+        printf("F[3] = %.5lf\n", F[3]);
+    }
+
+    /// compare the angular, total angular momentum and radial part of
+    /// the beta projectors, leaving the m index free. Only useful
+    /// when spin orbit coupling is included.
+    inline bool compare_index_beta_functions(const int xi, const int xj) const
+    {
+        return ((indexb(xi).l == indexb(xj).l) && (indexb(xi).idxrf == indexb(xj).idxrf) &&
+                (std::abs(indexb(xi).j - indexb(xj).j) < 1e-8));
+    }
+
+    inline void set_hubbard_occupancy_orbital(double occ)
+    {
+        if ((occ < 0) && (hubbard_correction_))
+            TERMINATE("this atom has hubbard correction but the orbital occupancy is negative\n");
+        hubbard_occupancy_orbital_ = occ;
+    }
+
+    inline void set_hubbard_l_and_n_orbital()
+    {
+        std::vector<std::pair<std::string, int>> nl_orb;
+
+        nl_orb.push_back(std::make_pair("Ti", 3));
+        nl_orb.push_back(std::make_pair("V", 3));
+        nl_orb.push_back(std::make_pair("Cr", 3));
+        nl_orb.push_back(std::make_pair("Mn", 3));
+        nl_orb.push_back(std::make_pair("Fe", 3));
+        nl_orb.push_back(std::make_pair("Co", 3));
+        nl_orb.push_back(std::make_pair("Ni", 3));
+        nl_orb.push_back(std::make_pair("Cu", 3));
+        nl_orb.push_back(std::make_pair("Zn", 3));
+        nl_orb.push_back(std::make_pair("As", 3));
+        nl_orb.push_back(std::make_pair("Ga", 3));
+
+        nl_orb.push_back(std::make_pair("Zr", 4));
+        nl_orb.push_back(std::make_pair("Nb", 4));
+        nl_orb.push_back(std::make_pair("Mo", 4));
+        nl_orb.push_back(std::make_pair("Tc", 4));
+        nl_orb.push_back(std::make_pair("Ru", 4));
+        nl_orb.push_back(std::make_pair("Rh", 4));
+        nl_orb.push_back(std::make_pair("Pd", 4));
+        nl_orb.push_back(std::make_pair("Ag", 4));
+        nl_orb.push_back(std::make_pair("Cd", 4));
+        nl_orb.push_back(std::make_pair("Ce", 4));
+        nl_orb.push_back(std::make_pair("Pr", 4));
+        nl_orb.push_back(std::make_pair("Nd", 4));
+        nl_orb.push_back(std::make_pair("Pm", 4));
+        nl_orb.push_back(std::make_pair("Sm", 4));
+        nl_orb.push_back(std::make_pair("Eu", 4));
+        nl_orb.push_back(std::make_pair("Gd", 4));
+        nl_orb.push_back(std::make_pair("Tb", 4));
+        nl_orb.push_back(std::make_pair("Dy", 4));
+        nl_orb.push_back(std::make_pair("Ho", 4));
+        nl_orb.push_back(std::make_pair("Er", 4));
+        nl_orb.push_back(std::make_pair("Tm", 4));
+        nl_orb.push_back(std::make_pair("Yb", 4));
+        nl_orb.push_back(std::make_pair("Lu", 4));
+        nl_orb.push_back(std::make_pair("In", 4));
+
+        nl_orb.push_back(std::make_pair("Th", 5));
+        nl_orb.push_back(std::make_pair("Pa", 5));
+        nl_orb.push_back(std::make_pair("U", 5));
+        nl_orb.push_back(std::make_pair("Np", 5));
+        nl_orb.push_back(std::make_pair("Pu", 5));
+        nl_orb.push_back(std::make_pair("Am", 5));
+        nl_orb.push_back(std::make_pair("Cm", 5));
+        nl_orb.push_back(std::make_pair("Bk", 5));
+        nl_orb.push_back(std::make_pair("Cf", 5));
+        nl_orb.push_back(std::make_pair("Es", 5));
+        nl_orb.push_back(std::make_pair("Fm", 5));
+        nl_orb.push_back(std::make_pair("Md", 5));
+        nl_orb.push_back(std::make_pair("No", 5));
+        nl_orb.push_back(std::make_pair("Lr", 5));
+        nl_orb.push_back(std::make_pair("Hf", 5));
+        nl_orb.push_back(std::make_pair("Ta", 5));
+        nl_orb.push_back(std::make_pair("W", 5));
+        nl_orb.push_back(std::make_pair("Re", 5));
+        nl_orb.push_back(std::make_pair("Os", 5));
+        nl_orb.push_back(std::make_pair("Ir", 5));
+        nl_orb.push_back(std::make_pair("Pt", 5));
+        nl_orb.push_back(std::make_pair("Au", 5));
+        nl_orb.push_back(std::make_pair("Hg", 5));
+
+        nl_orb.push_back(std::make_pair("H", 1));
+
+        nl_orb.push_back(std::make_pair("C", 2));
+        nl_orb.push_back(std::make_pair("N", 2));
+        nl_orb.push_back(std::make_pair("O", 2));
+
+        for(size_t i = 0; i < nl_orb.size(); i++) {
+            if(nl_orb[i].first == symbol_) {
+                hubbard_n_ = nl_orb[i].second;
+                break;
             }
-            
-            radial_solution_descriptor rsd;
-            
-            rsd.n = n;
-            if (n == -1) {
-                /* default value for any l */
-                rsd.n = l + 1;
-                for (int ist = 0; ist < num_atomic_levels(); ist++) {
-                    if (atomic_level(ist).core && atomic_level(ist).l == l) {   
-                        /* take next level after the core */
-                        rsd.n = atomic_level(ist).n + 1;
-                    }
-                }
+        }
+
+        if (hubbard_n_ < 0) {
+            TERMINATE("The atom %s is not included in the list of atoms with hubbard correction\n");
+        }
+
+        // same with orbital momentum
+        nl_orb.clear();
+        // d orbitals
+        nl_orb.push_back(std::make_pair("Ti", 2));
+        nl_orb.push_back(std::make_pair("V", 2));
+        nl_orb.push_back(std::make_pair("Cr", 2));
+        nl_orb.push_back(std::make_pair("Mn", 2));
+        nl_orb.push_back(std::make_pair("Fe", 2));
+        nl_orb.push_back(std::make_pair("Co", 2));
+        nl_orb.push_back(std::make_pair("Ni", 2));
+        nl_orb.push_back(std::make_pair("Cu", 2));
+        nl_orb.push_back(std::make_pair("Zn", 2));
+        nl_orb.push_back(std::make_pair("Zr", 2));
+        nl_orb.push_back(std::make_pair("Nb", 2));
+        nl_orb.push_back(std::make_pair("Mo", 2));
+        nl_orb.push_back(std::make_pair("Tc", 2));
+        nl_orb.push_back(std::make_pair("Ru", 2));
+        nl_orb.push_back(std::make_pair("Rh", 2));
+        nl_orb.push_back(std::make_pair("Pd", 2));
+        nl_orb.push_back(std::make_pair("Ag", 2));
+        nl_orb.push_back(std::make_pair("Cd", 2));
+        nl_orb.push_back(std::make_pair("Hf", 2));
+        nl_orb.push_back(std::make_pair("Ta", 2));
+        nl_orb.push_back(std::make_pair("W", 2));
+        nl_orb.push_back(std::make_pair("Re", 2));
+        nl_orb.push_back(std::make_pair("Os", 2));
+        nl_orb.push_back(std::make_pair("Ir", 2));
+        nl_orb.push_back(std::make_pair("Pt", 2));
+        nl_orb.push_back(std::make_pair("Au", 2));
+        nl_orb.push_back(std::make_pair("Hg", 2));
+        nl_orb.push_back(std::make_pair("As", 2));
+        nl_orb.push_back(std::make_pair("Ga", 2));
+        nl_orb.push_back(std::make_pair("In", 2));
+
+        // f orbitals
+        nl_orb.push_back(std::make_pair("Ce", 3));
+        nl_orb.push_back(std::make_pair("Pr", 3));
+        nl_orb.push_back(std::make_pair("Nd", 3));
+        nl_orb.push_back(std::make_pair("Pm", 3));
+        nl_orb.push_back(std::make_pair("Sm", 3));
+        nl_orb.push_back(std::make_pair("Eu", 3));
+        nl_orb.push_back(std::make_pair("Gd", 3));
+        nl_orb.push_back(std::make_pair("Tb", 3));
+        nl_orb.push_back(std::make_pair("Dy", 3));
+        nl_orb.push_back(std::make_pair("Ho", 3));
+        nl_orb.push_back(std::make_pair("Er", 3));
+        nl_orb.push_back(std::make_pair("Tm", 3));
+        nl_orb.push_back(std::make_pair("Yb", 3));
+        nl_orb.push_back(std::make_pair("Lu", 3));
+        nl_orb.push_back(std::make_pair("Th", 3));
+        nl_orb.push_back(std::make_pair("Pa", 3));
+        nl_orb.push_back(std::make_pair("U", 3));
+        nl_orb.push_back(std::make_pair("Np", 3));
+        nl_orb.push_back(std::make_pair("Pu", 3));
+        nl_orb.push_back(std::make_pair("Am", 3));
+        nl_orb.push_back(std::make_pair("Cm", 3));
+        nl_orb.push_back(std::make_pair("Bk", 3));
+        nl_orb.push_back(std::make_pair("Cf", 3));
+        nl_orb.push_back(std::make_pair("Es", 3));
+        nl_orb.push_back(std::make_pair("Fm", 3));
+        nl_orb.push_back(std::make_pair("Md", 3));
+        nl_orb.push_back(std::make_pair("No", 3));
+        nl_orb.push_back(std::make_pair("Lr", 3));
+
+        // s orbitals
+        nl_orb.push_back(std::make_pair("H", 0));
+
+        // p orbitals
+        nl_orb.push_back(std::make_pair("C", 1));
+        nl_orb.push_back(std::make_pair("N", 1));
+        nl_orb.push_back(std::make_pair("O", 1));
+
+        for(size_t i = 0; i < nl_orb.size(); i++) {
+            if(nl_orb[i].first == symbol_) {
+                hubbard_l_ = nl_orb[i].second;
+                break;
             }
-            
-            rsd.l = l;
-            rsd.dme = dme;
-            rsd.enu = enu;
-            rsd.auto_enu = auto_enu;
-            lo_descriptors_[ilo].rsd_set.push_back(rsd);
         }
 
-        inline void add_lo_descriptor(local_orbital_descriptor const& lod__)
-        {
-            lo_descriptors_.push_back(lod__);
+        if (hubbard_l_ < 0) {
+            TERMINATE("The atom %s is not included in the list of atoms with hubbard correction\n");
         }
 
-        inline void init_free_atom(bool smooth);
+    }
 
-        inline void print_info() const;
 
-        inline int id() const
-        {
-            return id_;
-        }
+    inline const double get_occupancy_hubbard_orbital() const
+    {
+        return hubbard_occupancy_orbital_;
+    }
 
-        inline int zn() const
-        {
-            assert(zn_ > 0);
-            return zn_;
-        }
-
-        inline std::string const& symbol() const
-        { 
-            return symbol_;
+    inline void set_occupancy_hubbard_orbital(double oc)
+    {
+        if (oc > 0.0) {
+            hubbard_occupancy_orbital_ = oc;
+            return;
         }
 
-        inline std::string const& name() const
-        { 
-            return name_;
-        }
+        std::vector<std::pair<std::string, double>> occ;
+        occ.clear();
 
-        inline double mass() const
-        {
-            return mass_;
-        }
+        // transition metals
+        occ.push_back(std::make_pair("Ti", 2.0));
+        occ.push_back(std::make_pair("Zr", 2.0));
+        occ.push_back(std::make_pair("Hf", 2.0));
+        occ.push_back(std::make_pair("V", 3.0));
+        occ.push_back(std::make_pair("Nb", 3.0));
+        occ.push_back(std::make_pair("Ta", 3.0));
+        occ.push_back(std::make_pair("Cr", 5.0));
+        occ.push_back(std::make_pair("Mo", 5.0));
+        occ.push_back(std::make_pair("W", 5.0));
+        occ.push_back(std::make_pair("Mn", 5.0));
+        occ.push_back(std::make_pair("Tc", 5.0));
+        occ.push_back(std::make_pair("re", 5.0));
+        occ.push_back(std::make_pair("Fe", 6.0));
+        occ.push_back(std::make_pair("Ru", 6.0));
+        occ.push_back(std::make_pair("Os", 6.0));
+        occ.push_back(std::make_pair("Co", 7.0));
+        occ.push_back(std::make_pair("Rh", 7.0));
+        occ.push_back(std::make_pair("Ir", 7.0));
+        occ.push_back(std::make_pair("Ni", 8.0));
+        occ.push_back(std::make_pair("Pd", 8.0));
+        occ.push_back(std::make_pair("Pt", 8.0));
+        occ.push_back(std::make_pair("Cu", 10.0));
+        occ.push_back(std::make_pair("Ag", 10.0));
+        occ.push_back(std::make_pair("Au", 10.0));
+        occ.push_back(std::make_pair("Zn", 10.0));
+        occ.push_back(std::make_pair("Cd", 10.0));
+        occ.push_back(std::make_pair("Hg", 10.0));
+        occ.push_back(std::make_pair("Ce", 2.0));
+        occ.push_back(std::make_pair("Th", 2.0));
+        occ.push_back(std::make_pair("Pr", 3.0));
+        occ.push_back(std::make_pair("Pa", 3.0));
+        occ.push_back(std::make_pair("Nd", 4.0));
+        occ.push_back(std::make_pair("U", 4.0));
+        occ.push_back(std::make_pair("Pm", 5.0));
+        occ.push_back(std::make_pair("Np", 5.0));
+        occ.push_back(std::make_pair("Sm", 6.0));
+        occ.push_back(std::make_pair("Pu", 6.0));
+        occ.push_back(std::make_pair("Eu", 6.0));
+        occ.push_back(std::make_pair("Am", 6.0));
+        occ.push_back(std::make_pair("Gd", 7.0));
+        occ.push_back(std::make_pair("Cm", 7.0));
+        occ.push_back(std::make_pair("Tb", 8.0));
+        occ.push_back(std::make_pair("Bk", 8.0));
+        occ.push_back(std::make_pair("Dy", 9.0));
+        occ.push_back(std::make_pair("Cf", 9.0));
+        occ.push_back(std::make_pair("Ho", 10.0));
+        occ.push_back(std::make_pair("Es", 10.0));
+        occ.push_back(std::make_pair("Er", 11.0));
+        occ.push_back(std::make_pair("Fm", 11.0));
+        occ.push_back(std::make_pair("Tm", 12.0));
+        occ.push_back(std::make_pair("Md", 12.0));
+        occ.push_back(std::make_pair("Yb", 13.0));
+        occ.push_back(std::make_pair("No", 13.0));
+        occ.push_back(std::make_pair("Lu", 14.0));
+        occ.push_back(std::make_pair("Lr", 14.0));
+        occ.push_back(std::make_pair("C", 2.0));
+        occ.push_back(std::make_pair("N", 3.0));
+        occ.push_back(std::make_pair("O", 4.0));
+        occ.push_back(std::make_pair("H", 1.0));
+        occ.push_back(std::make_pair("Ga", 10.0));
+        occ.push_back(std::make_pair("In", 10.0));
 
-        inline double mt_radius() const
-        {
-            return mt_radius_;
-        }
-
-        inline int num_mt_points() const
-        {
-            assert(num_mt_points_ > 0);
-            return num_mt_points_;
-        }
-
-        inline Radial_grid<double> const& radial_grid() const
-        {
-            assert(num_mt_points_ > 0);
-            assert(radial_grid_.num_points() > 0);
-            return radial_grid_;
-        }
-
-        inline Radial_grid<double> const& free_atom_radial_grid() const
-        {
-            return free_atom_radial_grid_;
-        }
-
-        inline double radial_grid(int ir) const
-        {
-            return radial_grid_[ir];
-        }
-
-        inline double free_atom_radial_grid(int ir) const
-        {
-            return free_atom_radial_grid_[ir];
-        }
-
-        inline int num_atomic_levels() const
-        {
-            return static_cast<int>(atomic_levels_.size());
-        }
-
-        inline atomic_level_descriptor const& atomic_level(int idx) const
-        {
-            return atomic_levels_[idx];
-        }
-
-        inline double num_core_electrons() const
-        {
-            return num_core_electrons_;
-        }
-
-        inline double num_valence_electrons() const
-        {
-            return num_valence_electrons_;
-        }
-
-        inline double free_atom_density(const int idx) const
-        {
-            return free_atom_density_spline_[idx];
-        }
-
-        inline double free_atom_density(double x) const
-        {
-            return free_atom_density_spline_(x);
-        }
-
-        inline int num_aw_descriptors() const
-        {
-            return static_cast<int>(aw_descriptors_.size());
-        }
-
-        inline radial_solution_descriptor_set const& aw_descriptor(int l) const
-        {
-            assert(l < (int)aw_descriptors_.size());
-            return aw_descriptors_[l];
-        }
-
-        inline int num_lo_descriptors() const
-        {
-            return (int)lo_descriptors_.size();
-        }
-
-        inline local_orbital_descriptor const& lo_descriptor(int idx) const
-        {
-            return lo_descriptors_[idx];
-        }
-
-        inline int max_aw_order() const
-        {
-            return max_aw_order_;
-        }
-
-        /// Order of augmented wave radial functions for a given l.
-        inline int aw_order(int l__) const
-        {
-            return static_cast<int>(aw_descriptor(l__).size());
-        }
-
-        inline radial_functions_index const& indexr() const
-        {
-            return indexr_;
-        }
-        
-        inline radial_function_index_descriptor const& indexr(int i) const
-        {
-            assert(i >= 0 && i < (int)indexr_.size());
-            return indexr_[i];
-        }
-
-        inline int indexr_by_l_order(int l, int order) const
-        {
-            return indexr_.index_by_l_order(l, order);
-        }
-        
-        inline int indexr_by_idxlo(int idxlo) const
-        {
-            return indexr_.index_by_idxlo(idxlo);
-        }
-
-        inline basis_functions_index const& indexb() const
-        {
-            return indexb_;
-        }
-
-        inline basis_function_index_descriptor const& indexb(int i) const
-        {
-            assert(i >= 0 && i < (int)indexb_.size());
-            return indexb_[i];
-        }
-
-        inline int indexb_by_l_m_order(int l, int m, int order) const
-        {
-            return indexb_.index_by_l_m_order(l, m, order);
-        }
-        
-        inline int indexb_by_lm_order(int lm, int order) const
-        {
-            return indexb_.index_by_lm_order(lm, order);
-        }
-
-        inline int mt_aw_basis_size() const
-        {
-            return indexb_.size_aw();
-        }
-        
-        inline int mt_lo_basis_size() const
-        {
-            return indexb_.size_lo();
-        }
-
-        inline int mt_basis_size() const
-        {
-            return indexb_.size();
-        }
-
-        inline int mt_radial_basis_size() const
-        {
-            return indexr_.size();
-        }
-
-        /// Return index of a free atom grid point close to the muffin-tin radius.
-        inline int idx_rmt_free_atom() const
-        {
-            for (int i = 0; i < free_atom_radial_grid().num_points(); i++)
-            {
-                if (free_atom_radial_grid(i) > mt_radius()) return i - 1;
+        for(size_t i = 0; i < occ.size(); i++) {
+            if (occ[i].first == symbol_) {
+                hubbard_occupancy_orbital_  = occ[i].second;
+                occ.clear();
+                break;
             }
-            return -1;
         }
 
-        inline pseudopotential_descriptor const& pp_desc() const
-        {
-            return pp_desc_;
+        if (hubbard_occupancy_orbital_ < 0.0) {
+            TERMINATE("this atom is not in the list of atoms with hubbard corrections\n");
         }
-
-        inline pseudopotential_descriptor& pp_desc()
-        {
-            return pp_desc_;
-        }
-
-        inline void set_symbol(const std::string symbol__)
-        {
-            symbol_ = symbol__;
-        }
-
-        inline void set_zn(int zn__)
-        {
-            zn_ = zn__;
-        }
-
-        inline void set_mass(double mass__)
-        {
-            mass_ = mass__;
-        }
-        
-        inline void set_mt_radius(double mt_radius__) // TODO: this can cause inconsistency with radial_grid; remove this method
-                                                      // mt_radius should always be the last point of radial_grid
-        {
-            mt_radius_ = mt_radius__;
-        }
-
-        inline void set_num_mt_points(int num_mt_points__)
-        {
-            num_mt_points_ = num_mt_points__;
-        }
-
-        inline void set_radial_grid_origin(double radial_grid_origin__)
-        {
-            radial_grid_origin_ = radial_grid_origin__;
-        }
-
-        inline void set_configuration(int n, int l, int k, double occupancy, bool core)
-        {
-            atomic_level_descriptor level;
-            level.n         = n;
-            level.l         = l;
-            level.k         = k;
-            level.occupancy = occupancy;
-            level.core      = core;
-            atomic_levels_.push_back(level);
-        }
-        
-        /// Return number of atoms of a given type.
-        inline int num_atoms() const
-        {
-            return static_cast<int>(atom_id_.size());
-        }
-
-        inline int atom_id(int idx) const
-        {
-            return atom_id_[idx];
-        }
-
-        inline void add_atom_id(int atom_id__)
-        {
-            atom_id_.push_back(atom_id__);
-        }
-
-        inline bool initialized() const
-        {
-            return initialized_;
-        }
-
-        inline std::string const& label() const
-        {
-            return label_;
-        }
-
-        inline std::string const& file_name() const
-        {
-            return file_name_;
-        }
-
-        inline int offset_lo() const
-        {
-            assert(offset_lo_ >= 0);
-            return offset_lo_;
-        }
-
-        inline void set_d_mtrx_ion(matrix<double>& d_mtrx_ion__)
-        {
-            pp_desc_.d_mtrx_ion = matrix<double>(d_mtrx_ion__.size(0), d_mtrx_ion__.size(1));
-            d_mtrx_ion__ >> pp_desc_.d_mtrx_ion;
-        }
-
-        inline mdarray<int, 2> const& idx_radial_integrals() const
-        {
-            return idx_radial_integrals_;
-        }
-        
-        inline mdarray<double, 3>& rf_coef() const
-        {
-            return rf_coef_;
-        }
-
-        inline mdarray<double, 3>& vrf_coef() const
-        {
-            return vrf_coef_;
-        }
-
-        inline Simulation_parameters const& parameters() const
-        {
-            return parameters_;
-        }
-
-        inline void set_free_atom_radial_grid(int num_points__, double const* points__)
-        {
-            if (num_points__ <= 0) {
-                TERMINATE("wrong number of radial points");
-            }
-            free_atom_radial_grid_ = Radial_grid_ext<double>(num_points__, points__);
-        }
-
-        inline void set_free_atom_density(int num_points__, double const* dens__)
-        {
-            free_atom_density_.resize(num_points__);
-            std::memcpy(free_atom_density_.data(), dens__, num_points__ * sizeof(double));
-        }
-
-        inline Spline<double> const& beta_rf(int idxrf__) const
-        {
-            return beta_rf_[idxrf__];
-        }
-
-        inline Spline<double> const& q_rf(int idx__, int l__) const
-        {
-            return q_rf_(idx__, l__);
-        }
+    }
+  private:
+    void read_hubbard_input();
+    void generate_f_coefficients(void);
+    inline double ClebschGordan(const int l, const double j, const double m, const int spin);
+    inline double_complex calculate_U_sigma_m(const int l, const double j, const int mj, const int m, const int sigma);
+    inline void calculate_ak_coefficients(mdarray<double, 5> &ak);
+    inline void compute_hubbard_matrix();
 };
 
 inline void Atom_type::init(int offset_lo__)
@@ -907,17 +1390,16 @@ inline void Atom_type::init(int offset_lo__)
     if (parameters_.full_potential()) {
         atomic_level_descriptor level;
         for (int ist = 0; ist < 28; ist++) {
-            bool found = false;
-            level.n = atomic_conf[zn_ - 1][ist][0];
-            level.l = atomic_conf[zn_ - 1][ist][1];
-            level.k = atomic_conf[zn_ - 1][ist][2];
+            bool found      = false;
+            level.n         = atomic_conf[zn_ - 1][ist][0];
+            level.l         = atomic_conf[zn_ - 1][ist][1];
+            level.k         = atomic_conf[zn_ - 1][ist][2];
             level.occupancy = double(atomic_conf[zn_ - 1][ist][3]);
-            level.core = false;
+            level.core      = false;
 
             if (level.n != -1) {
                 for (size_t jst = 0; jst < atomic_levels_.size(); jst++) {
-                    if (atomic_levels_[jst].n == level.n &&
-                        atomic_levels_[jst].l == level.l &&
+                    if (atomic_levels_[jst].n == level.n && atomic_levels_[jst].l == level.l &&
                         atomic_levels_[jst].k == level.k) {
                         found = true;
                     }
@@ -928,18 +1410,18 @@ inline void Atom_type::init(int offset_lo__)
             }
         }
         /* get the number of core electrons */
-        for (auto& e: atomic_levels_) {
+        for (auto& e : atomic_levels_) {
             if (e.core) {
                 num_core_electrons_ += e.occupancy;
             }
         }
     }
-    
+
     /* set default radial grid if it was not done by user */
     if (radial_grid_.num_points() == 0) {
         set_radial_grid();
     }
-    
+
     if (parameters_.full_potential()) {
         /* initialize aw descriptors if they were not set manually */
         if (aw_descriptors_.size() == 0) {
@@ -965,16 +1447,18 @@ inline void Atom_type::init(int offset_lo__)
         for (int i = 0; i < pp_desc_.num_beta_radial_functions; i++) {
             /* think of |beta> functions as of local orbitals */
             lod.l = pp_desc_.beta_l[i];
+            if (pp_desc_.spin_orbit_coupling)
+                lod.total_angular_momentum = pp_desc_.beta_j[i];
             lo_descriptors_.push_back(lod);
         }
     }
-    
+
     /* initialize index of radial functions */
     indexr_.init(aw_descriptors_, lo_descriptors_);
 
     /* initialize index of muffin-tin basis functions */
     indexb_.init(indexr_);
-    
+
     if (!parameters_.full_potential()) {
         /* number of radial beta-functions */
         int nbrf = mt_radial_basis_size();
@@ -984,7 +1468,7 @@ inline void Atom_type::init(int offset_lo__)
         beta_rf_ = mdarray<Spline<double>, 1>(mt_radial_basis_size());
         for (int idxrf = 0; idxrf < nbrf; idxrf++) {
             beta_rf_[idxrf] = Spline<double>(radial_grid());
-            int nr = pp_desc().num_beta_radial_points[idxrf];
+            int nr          = pp_desc().num_beta_radial_points[idxrf];
             for (int ir = 0; ir < nr; ir++) {
                 beta_rf_[idxrf][ir] = pp_desc().beta_radial_functions(ir, idxrf);
             }
@@ -1021,7 +1505,7 @@ inline void Atom_type::init(int offset_lo__)
             int l = l_by_lm[lm];
 
             for (int i2 = 0; i2 < indexr().size(); i2++) {
-                int l2 = indexr(i2).l; 
+                int l2 = indexr(i2).l;
                 for (int i1 = 0; i1 <= i2; i1++) {
                     int l1 = indexr(i1).l;
                     if ((l + l1 + l2) % 2 == 0) {
@@ -1044,16 +1528,26 @@ inline void Atom_type::init(int offset_lo__)
     }
 
     if (parameters_.processing_unit() == GPU && parameters_.full_potential()) {
-        #ifdef __GPU
+#ifdef __GPU
         idx_radial_integrals_.allocate(memory_t::device);
         idx_radial_integrals_.copy_to_device();
         rf_coef_ = mdarray<double, 3>(num_mt_points_, 4, indexr().size(), memory_t::host_pinned | memory_t::device);
-        vrf_coef_ = mdarray<double, 3>(num_mt_points_, 4, lmmax_pot * indexr().size() * (parameters_.num_mag_dims() + 1), memory_t::host_pinned | memory_t::device); 
-        #else
+        vrf_coef_ =
+            mdarray<double, 3>(num_mt_points_, 4, lmmax_pot * indexr().size() * (parameters_.num_mag_dims() + 1),
+                               memory_t::host_pinned | memory_t::device);
+#else
         TERMINATE_NO_GPU
-        #endif
+#endif
     }
-    
+
+    if (this->hubbard_correction_) {
+        set_hubbard_l_and_n_orbital();
+        set_occupancy_hubbard_orbital(-1.0);
+        compute_hubbard_matrix();
+    }
+
+    if (this->pp_desc().spin_orbit_coupling)
+        this->generate_f_coefficients();
     initialized_ = true;
 }
 
@@ -1064,7 +1558,7 @@ inline void Atom_type::init_free_atom(bool smooth)
     if (smooth) {
         /* find point on the grid close to the muffin-tin radius */
         int irmt = idx_rmt_free_atom();
-    
+
         mdarray<double, 1> b(2);
         mdarray<double, 2> A(2, 2);
         double R = free_atom_radial_grid_[irmt];
@@ -1072,12 +1566,12 @@ inline void Atom_type::init_free_atom(bool smooth)
         A(0, 1) = std::pow(R, 3);
         A(1, 0) = 2 * R;
         A(1, 1) = 3 * std::pow(R, 2);
-        
+
         b(0) = free_atom_density_spline_[irmt];
         b(1) = free_atom_density_spline_.deriv(1, irmt);
 
         linalg<CPU>::gesv<double>(2, 1, A.at<CPU>(), 2, b.at<CPU>(), 2);
-       
+
         //== /* write initial density */
         //== std::stringstream sstr;
         //== sstr << "free_density_" << id_ << ".dat";
@@ -1088,11 +1582,11 @@ inline void Atom_type::init_free_atom(bool smooth)
         //==     fprintf(fout, "%f %f \n", free_atom_radial_grid(ir), free_atom_density_[ir]);
         //== }
         //== fclose(fout);
-        
+
         /* make smooth free atom density inside muffin-tin */
         for (int i = 0; i <= irmt; i++) {
-            free_atom_density_spline_[i] = b(0) * std::pow(free_atom_radial_grid(i), 2) + 
-                                           b(1) * std::pow(free_atom_radial_grid(i), 3);
+            free_atom_density_spline_[i] =
+                b(0) * std::pow(free_atom_radial_grid(i), 2) + b(1) * std::pow(free_atom_radial_grid(i), 3);
         }
 
         /* interpolate new smooth density */
@@ -1108,7 +1602,7 @@ inline void Atom_type::init_free_atom(bool smooth)
         //==     fprintf(fout, "%f %f \n", free_atom_radial_grid(ir), free_atom_density_[ir]);
         //== }
         //== fclose(fout);
-   }
+    }
 }
 
 inline void Atom_type::print_info() const
@@ -1130,45 +1624,45 @@ inline void Atom_type::print_info() const
     printf("number of core electrons    : %f\n", num_core_electrons_);
     printf("number of valence electrons : %f\n", num_valence_electrons_);
 
-    if (parameters_.full_potential())
-    {
+    if (parameters_.hubbard_correction() && this->hubbard_correction()) {
+        printf("Hubbard correction is included in the calculations");
+        printf("\n");
+        printf("Angular momentum : %d\n", hubbard_l());
+        printf("principal quantum number : %d\n", hubbard_n());
+        printf("Occupancy : %f\n", hubbard_occupancy_orbital_);
+    }
+
+    if (parameters_.full_potential()) {
         printf("\n");
         printf("atomic levels (n, l, k, occupancy, core)\n");
-        for (int i = 0; i < (int)atomic_levels_.size(); i++)
-        {
+        for (int i = 0; i < (int)atomic_levels_.size(); i++) {
             printf("%i  %i  %i  %8.4f %i\n", atomic_levels_[i].n, atomic_levels_[i].l, atomic_levels_[i].k,
-                                             atomic_levels_[i].occupancy, atomic_levels_[i].core);
+                   atomic_levels_[i].occupancy, atomic_levels_[i].core);
         }
         printf("\n");
         printf("local orbitals\n");
-        for (int j = 0; j < (int)lo_descriptors_.size(); j++)
-        {
+        for (int j = 0; j < (int)lo_descriptors_.size(); j++) {
             printf("[");
-            for (int order = 0; order < (int)lo_descriptors_[j].rsd_set.size(); order++)
-            {
-                if (order) printf(", ");
+            for (int order = 0; order < (int)lo_descriptors_[j].rsd_set.size(); order++) {
+                if (order)
+                    printf(", ");
                 printf("{l : %2i, n : %2i, enu : %f, dme : %i, auto : %i}", lo_descriptors_[j].rsd_set[order].l,
-                                                                            lo_descriptors_[j].rsd_set[order].n,
-                                                                            lo_descriptors_[j].rsd_set[order].enu,
-                                                                            lo_descriptors_[j].rsd_set[order].dme,
-                                                                            lo_descriptors_[j].rsd_set[order].auto_enu);
+                       lo_descriptors_[j].rsd_set[order].n, lo_descriptors_[j].rsd_set[order].enu,
+                       lo_descriptors_[j].rsd_set[order].dme, lo_descriptors_[j].rsd_set[order].auto_enu);
             }
             printf("]\n");
         }
 
         printf("\n");
         printf("augmented wave basis\n");
-        for (int j = 0; j < (int)aw_descriptors_.size(); j++)
-        {
+        for (int j = 0; j < (int)aw_descriptors_.size(); j++) {
             printf("[");
-            for (int order = 0; order < (int)aw_descriptors_[j].size(); order++)
-            { 
-                if (order) printf(", ");
+            for (int order = 0; order < (int)aw_descriptors_[j].size(); order++) {
+                if (order)
+                    printf(", ");
                 printf("{l : %2i, n : %2i, enu : %f, dme : %i, auto : %i}", aw_descriptors_[j][order].l,
-                                                                            aw_descriptors_[j][order].n,
-                                                                            aw_descriptors_[j][order].enu,
-                                                                            aw_descriptors_[j][order].dme,
-                                                                            aw_descriptors_[j][order].auto_enu);
+                       aw_descriptors_[j][order].n, aw_descriptors_[j][order].enu, aw_descriptors_[j][order].dme,
+                       aw_descriptors_[j][order].auto_enu);
             }
             printf("]\n");
         }
@@ -1304,6 +1798,7 @@ inline void Atom_type::read_input_lo(json const& parser)
     }
 }
 
+
 inline void Atom_type::read_pseudo_uspp(json const& parser)
 {
     symbol_ = parser["pseudo_potential"]["header"]["element"];
@@ -1321,20 +1816,24 @@ inline void Atom_type::read_pseudo_uspp(json const& parser)
 
     pp_desc_.vloc = parser["pseudo_potential"]["local_potential"].get<std::vector<double>>();
 
-    pp_desc_.core_charge_density = parser["pseudo_potential"].value("core_charge_density", std::vector<double>(rgrid.size(), 0));
+    pp_desc_.core_charge_density =
+        parser["pseudo_potential"].value("core_charge_density", std::vector<double>(rgrid.size(), 0));
 
     pp_desc_.total_charge_density = parser["pseudo_potential"]["total_charge_density"].get<std::vector<double>>();
 
-    if (pp_desc_.vloc.size() != rgrid.size() ||
-        pp_desc_.core_charge_density.size() != rgrid.size() ||
+    if (pp_desc_.vloc.size() != rgrid.size() || pp_desc_.core_charge_density.size() != rgrid.size() ||
         pp_desc_.total_charge_density.size() != rgrid.size()) {
-        std::cout << pp_desc_.vloc.size() << " " << pp_desc_.core_charge_density.size() << " " << pp_desc_.total_charge_density.size() << std::endl;
+        std::cout << pp_desc_.vloc.size() << " " << pp_desc_.core_charge_density.size() << " "
+                  << pp_desc_.total_charge_density.size() << std::endl;
         TERMINATE("wrong array size");
     }
 
     mt_radius_ = rgrid.back();
 
     set_radial_grid(num_mt_points_, rgrid.data());
+
+    if (parser["pseudo_potential"]["header"].count("spin_orbit"))
+        pp_desc_.spin_orbit_coupling = true;
 
     pp_desc_.num_beta_radial_functions = parser["pseudo_potential"]["header"]["number_of_proj"];
 
@@ -1344,8 +1843,11 @@ inline void Atom_type::read_pseudo_uspp(json const& parser)
     pp_desc_.num_beta_radial_points.resize(pp_desc_.num_beta_radial_functions);
     pp_desc_.beta_l.resize(pp_desc_.num_beta_radial_functions);
 
-    int lmax_beta{0};
+    if (pp_desc_.spin_orbit_coupling)
+        pp_desc_.beta_j.resize(pp_desc_.num_beta_radial_functions);
+
     local_orbital_descriptor lod;
+    int lmax_beta{0};
     for (int i = 0; i < pp_desc_.num_beta_radial_functions; i++) {
         auto beta = parser["pseudo_potential"]["beta_projectors"][i]["radial_function"].get<std::vector<double>>();
         if (static_cast<int>(beta.size()) > num_mt_points_) {
@@ -1356,11 +1858,17 @@ inline void Atom_type::read_pseudo_uspp(json const& parser)
             TERMINATE(s);
         }
         pp_desc_.num_beta_radial_points[i] = static_cast<int>(beta.size());
-        std::memcpy(&pp_desc_.beta_radial_functions(0, i), &beta[0], pp_desc_.num_beta_radial_points[i] * sizeof(double));
+        std::memcpy(&pp_desc_.beta_radial_functions(0, i), &beta[0],
+                    pp_desc_.num_beta_radial_points[i] * sizeof(double));
 
         pp_desc_.beta_l[i] = parser["pseudo_potential"]["beta_projectors"][i]["angular_momentum"];
-        lmax_beta = std::max(lmax_beta, pp_desc_.beta_l[i]);
+        lmax_beta          = std::max(lmax_beta, pp_desc_.beta_l[i]);
+        if (pp_desc_.spin_orbit_coupling) {
+            pp_desc_.beta_j[i] = parser["pseudo_potential"]["beta_projectors"][i]["total_angular_momentum"];
+        }
     }
+
+    assert(lmax_beta >= 0);
 
     pp_desc_.d_mtrx_ion = mdarray<double, 2>(pp_desc_.num_beta_radial_functions, pp_desc_.num_beta_radial_functions);
     pp_desc_.d_mtrx_ion.zero();
@@ -1373,8 +1881,10 @@ inline void Atom_type::read_pseudo_uspp(json const& parser)
     }
 
     if (parser["pseudo_potential"].count("augmentation")) {
-        pp_desc_.augment = true;
-        pp_desc_.q_radial_functions_l = mdarray<double, 3>(num_mt_points_, pp_desc_.num_beta_radial_functions * (pp_desc_.num_beta_radial_functions + 1) / 2, 2 * lmax_beta + 1);
+        pp_desc_.augment              = true;
+        pp_desc_.q_radial_functions_l = mdarray<double, 3>(
+            num_mt_points_, pp_desc_.num_beta_radial_functions * (pp_desc_.num_beta_radial_functions + 1) / 2,
+            2 * lmax_beta + 1);
         pp_desc_.q_radial_functions_l.zero();
 
         for (size_t k = 0; k < parser["pseudo_potential"]["augmentation"].size(); k++) {
@@ -1396,11 +1906,13 @@ inline void Atom_type::read_pseudo_uspp(json const& parser)
         size_t nwf = parser["pseudo_potential"]["atomic_wave_functions"].size();
         for (size_t k = 0; k < nwf; k++) {
             std::pair<int, std::vector<double>> wf;
-            wf.second = parser["pseudo_potential"]["atomic_wave_functions"][k]["radial_function"].get<std::vector<double>>();
+            wf.second =
+                parser["pseudo_potential"]["atomic_wave_functions"][k]["radial_function"].get<std::vector<double>>();
 
             if ((int)wf.second.size() != num_mt_points_) {
                 std::stringstream s;
-                s << "wrong size of atomic functions for atom type " << symbol_ << " (label: " << label_ << ")" << std::endl
+                s << "wrong size of atomic functions for atom type " << symbol_ << " (label: " << label_ << ")"
+                  << std::endl
                   << "size of atomic radial functions in the file: " << wf.second.size() << std::endl
                   << "radial grid size: " << num_mt_points_;
                 TERMINATE(s);
@@ -1408,9 +1920,17 @@ inline void Atom_type::read_pseudo_uspp(json const& parser)
             wf.first = parser["pseudo_potential"]["atomic_wave_functions"][k]["angular_momentum"];
             pp_desc_.atomic_pseudo_wfs_.push_back(wf);
 
+            if (pp_desc_.spin_orbit_coupling &&
+                parser["pseudo_potential"]["atomic_wave_functions"][k].count("total_angular_momentum") &&
+                parser["pseudo_potential"]["atomic_wave_functions"][k].count("occupation")) {
+                double jchi = parser["pseudo_potential"]["atomic_wave_functions"][k]["total_angular_momentum"];
+                double occ = parser["pseudo_potential"]["atomic_wave_functions"][k]["occupation"];
+                pp_desc_.total_angular_momentum_wfs.push_back(jchi);
+                pp_desc_.occupation_wfs.push_back(occ);
+            }
             ///* read occupation of the function */
-            //double occ = parser["pseudo_potential"]["atomic_wave_functions"][k]["occupation"];
-            //pp_desc_.atomic_pseudo_wfs_occ_.push_back(occ);
+            // double occ = parser["pseudo_potential"]["atomic_wave_functions"][k]["occupation"];
+            // pp_desc_.atomic_pseudo_wfs_occ_.push_back(occ);
         }
     }
 }
@@ -1426,14 +1946,16 @@ inline void Atom_type::read_pseudo_paw(json const& parser)
     pp_desc_.cutoff_radius_index = parser["pseudo_potential"]["header"]["cutoff_radius_index"];
 
     /* read augmentation multipoles and integrals */
-    //pp_desc_.aug_integrals = parser["pseudo_potential"]["paw_data"]["aug_integrals"].get<std::vector<double>>();
+    // pp_desc_.aug_integrals = parser["pseudo_potential"]["paw_data"]["aug_integrals"].get<std::vector<double>>();
 
-    //pp_desc_.aug_multopoles = parser["pseudo_potential"]["paw_data"]["aug_multipoles"].get<std::vector<double>>();
+    // pp_desc_.aug_multopoles = parser["pseudo_potential"]["paw_data"]["aug_multipoles"].get<std::vector<double>>();
 
     /* read core density and potential */
-    pp_desc_.all_elec_core_charge = parser["pseudo_potential"]["paw_data"]["ae_core_charge_density"].get<std::vector<double>>();
+    pp_desc_.all_elec_core_charge =
+        parser["pseudo_potential"]["paw_data"]["ae_core_charge_density"].get<std::vector<double>>();
 
-    pp_desc_.all_elec_loc_potential = parser["pseudo_potential"]["paw_data"]["ae_local_potential"].get<std::vector<double>>();
+    pp_desc_.all_elec_loc_potential =
+        parser["pseudo_potential"]["paw_data"]["ae_local_potential"].get<std::vector<double>>();
 
     /* read occupations */
     pp_desc_.occupations = parser["pseudo_potential"]["paw_data"]["occupations"].get<std::vector<double>>();
@@ -1448,13 +1970,11 @@ inline void Atom_type::read_pseudo_paw(json const& parser)
     pp_desc_.pseudo_wfc.zero();
 
     /* read ae and ps wave functions */
-    for (int i = 0; i < num_wfc; i++)
-    {
+    for (int i = 0; i < num_wfc; i++) {
         /* read ae wave func */
         auto wfc = parser["pseudo_potential"]["paw_data"]["ae_wfc"][i]["radial_function"].get<std::vector<double>>();
 
-        if ((int)wfc.size() > num_mt_points_)
-        {
+        if ((int)wfc.size() > num_mt_points_) {
             std::stringstream s;
             s << "wrong size of beta functions for atom type " << symbol_ << " (label: " << label_ << ")" << std::endl
               << "size of beta radial functions in the file: " << wfc.size() << std::endl
@@ -1469,8 +1989,7 @@ inline void Atom_type::read_pseudo_paw(json const& parser)
 
         wfc = parser["pseudo_potential"]["paw_data"]["ps_wfc"][i]["radial_function"].get<std::vector<double>>();
 
-        if ((int)wfc.size() > num_mt_points_)
-        {
+        if ((int)wfc.size() > num_mt_points_) {
             std::stringstream s;
             s << "wrong size of beta functions for atom type " << symbol_ << " (label: " << label_ << ")" << std::endl
               << "size of beta radial functions in the file: " << wfc.size() << std::endl
@@ -1488,11 +2007,13 @@ inline void Atom_type::read_input(const std::string& fname)
 
     if (!parameters_.full_potential()) {
         read_pseudo_uspp(parser);
-        
+
         if (parser["pseudo_potential"].count("paw_data")) {
             read_pseudo_paw(parser);
         }
     }
+
+
 
     if (parameters_.full_potential()) {
         name_               = parser["name"];
@@ -1510,14 +2031,274 @@ inline void Atom_type::read_input(const std::string& fname)
         read_input_lo(parser);
 
         /* create free atom radial grid */
-        auto fa_r = parser["free_atom"]["radial_grid"].get<std::vector<double>>();
+        auto fa_r              = parser["free_atom"]["radial_grid"].get<std::vector<double>>();
         free_atom_radial_grid_ = Radial_grid_ext<double>(static_cast<int>(fa_r.size()), fa_r.data());
         /* read density */
         free_atom_density_ = parser["free_atom"]["density"].get<std::vector<double>>();
     }
+
+    // it is already done in input.h. I just initialize the
+    // different constants
+
+    read_hubbard_input();
+
+    if(parameters_.hubbard_correction()) {
+        hubbard_correction_ = true;
+        printf("Hubbard correction is included in the calculations");
+        printf("\n");
+        printf("Angular momentum : %d\n", hubbard_l());
+        printf("principal quantum number : %d\n", hubbard_n());
+        printf("Occupancy : %f\n", hubbard_occupancy_orbital_);
+    }
+
 }
-        
+
+inline double Atom_type::ClebschGordan(const int l, const double j, const double mj, const int spin)
+{
+    // l : orbital angular momentum
+    // m:  projection of the total angular momentum $m \pm /frac12$
+    // spin: Component of the spinor, 0 up, 1 down
+
+    double CG = 0.0; // Clebsch Gordan coeeficient cf PRB 71, 115106 page 3 first column
+
+    if ((spin != 0) && (spin != 1)) {
+        printf("Error : unkown spin direction\n");
+    }
+
+    const double denom = sqrt(1.0 / (2.0 * l + 1.0));
+
+    if (std::abs(j - l - 0.5) < 1e-8) {
+        int m = static_cast<int>(mj - 0.5);
+        if (spin == 0) {
+            CG = sqrt(l + m + 1.0);
+        }
+        if (spin == 1) {
+            CG = sqrt((l - m));
+        }
+    } else {
+        if (std::abs(j - l + 0.5) < 1e-8) {
+            int m = static_cast<int>(mj + 0.5);
+            if (m < (1 - l)) {
+                CG = 0.0;
+            } else {
+                if (spin == 0) {
+                    CG = sqrt(l - m + 1);
+                }
+                if (spin == 1) {
+                    CG = -sqrt(l + m);
+                }
+            }
+        } else {
+            printf("Clebsch gordan coefficients do not exist for this combination of j=%.5lf and l=%d\n", j, l);
+            exit(0);
+        }
+    }
+    return (CG * denom);
+}
+
+// this function computes the U^sigma_{ljm mj} coefficient that
+// rotates the complex spherical harmonics to the real one for the
+// spin orbit case
+
+// mj is normally half integer from -j to j but to avoid computation
+// error it is considered as integer so mj = 2 mj
+
+inline double_complex
+Atom_type::calculate_U_sigma_m(const int l, const double j, const int mj, const int mp, const int sigma)
+{
+
+    if ((sigma != 0) && (sigma != 1)) {
+        printf("SphericalIndex function : unkown spin direction\n");
+        return 0;
+    }
+
+    if (std::abs(j - l - 0.5) < 1e-8) {
+        // j = l + 1/2
+        // m = mj - 1/2
+
+        int m1 = (mj - 1) >> 1;
+        if (sigma == 0) { // up spin
+            if (m1 < -l) { // convention U^s_{mj,m'} = 0
+                return 0.0;
+            } else {// U^s_{mj,mp} =
+                return SHT::rlm_dot_ylm(l, m1, mp);
+            }
+        } else { // down spin
+            if ((m1 + 1) > l) {
+                return 0.0;
+            } else {
+                return SHT::rlm_dot_ylm(l, m1 + 1, mp);
+            }
+        }
+    } else {
+        if (std::abs(j - l + 0.5) < 1e-8) {
+            int m1 = (mj + 1) >> 1;
+            if (sigma == 0) {
+                return SHT::rlm_dot_ylm(l, m1 - 1, mp);
+            } else {
+                return SHT::rlm_dot_ylm(l, m1, mp);
+            }
+        } else {
+            printf("Spherical Index function : l and j are not compatible\n");
+            exit(0);
+        }
+    }
+}
+
+void Atom_type::generate_f_coefficients(void)
+{
+    // we consider Pseudo potentials with spin orbit couplings
+
+    // First thing, we need to compute the
+    // \f[f^{\sigma\sigma^\prime}_{l,j,m;l\prime,j\prime,m\prime}\f]
+    // They are defined by Eq.9 of Ref PRB 71, 115106
+    // and correspond to transformations of the
+    // spherical harmonics
+    if (!this->pp_desc().spin_orbit_coupling) {
+        return;
+    }
+
+    // number of beta projectors
+    int nbf         = this->mt_basis_size();
+    f_coefficients_ = mdarray<double_complex, 4>(nbf, nbf, 2, 2);
+    f_coefficients_.zero();
+
+    for (int xi2 = 0; xi2 < nbf; xi2++) {
+        const int l2    = this->indexb(xi2).l;
+        const double j2 = this->indexb(xi2).j;
+        const int m2    = this->indexb(xi2).m;
+        for (int xi1 = 0; xi1 < nbf; xi1++) {
+            const int l1    = this->indexb(xi1).l;
+            const double j1 = this->indexb(xi1).j;
+            const int m1    = this->indexb(xi1).m;
+
+            if ((l2 == l1) && (std::abs(j1 - j2) < 1e-8)) {
+                // take beta projectors with same l and j
+                for (auto sigma2 = 0; sigma2 < 2; sigma2++) {
+                    for (auto sigma1 = 0; sigma1 < 2; sigma1++) {
+                        double_complex coef = {0.0, 0.0};
+
+                        // yes durty but loop over double is worst.
+                        // since mj is only important for the rotation
+                        // of the spherical harmonics the code takes
+                        // into account this odd convention.
+
+                        int jj1 = static_cast<int>(2.0 * j1 + 1e-8);
+                        for (int mj = -jj1; mj <= jj1; mj += 2) {
+                            coef += calculate_U_sigma_m(l1, j1, mj, m1, sigma1) *
+                                    this->ClebschGordan(l1, j1, mj / 2.0, sigma1) *
+                                    std::conj(calculate_U_sigma_m(l2, j2, mj, m2, sigma2)) *
+                                    this->ClebschGordan(l2, j2, mj / 2.0, sigma2);
+                        }
+                        f_coefficients_(xi1, xi2, sigma1, sigma2) = coef;
+                    }
+                }
+            }
+        }
+    }
+}
+
+void Atom_type::calculate_ak_coefficients(mdarray<double, 5> &ak)
+{
+    // compute the ak coefficients appearing in the general treatment of
+    // hubbard corrections.  expression taken from Liechtenstein {\it et
+    // al}, PRB 52, R5467 (1995)
+
+    // Note that for consistency, the ak are calculated with complex
+    // harmonics in the gaunt coefficients <R_lm|Y_l'm'|R_l''m''>.
+    // we need to keep it that way because of the hubbard potential
+  // With a spherical one it does not really matter-
+    ak.zero();
+
+    for (int m1 = -this->hubbard_l_; m1 <= this->hubbard_l_; m1++) {
+        for (int m2 = -this->hubbard_l_; m2 <= this->hubbard_l_; m2++) {
+            for (int m3 = -this->hubbard_l_; m3 <= this->hubbard_l_; m3++) {
+                for (int m4 = -this->hubbard_l_; m4 <= this->hubbard_l_; m4++) {
+                    for (int k = 0; k < 2*this->hubbard_l_; k += 2) {
+                        double sum = 0.0;
+                        for (int q = -k; q <= k; q++) {
+                            sum += SHT::gaunt_rlm_ylm_rlm(this->hubbard_l_, k, this->hubbard_l_, m1, q, m2) *
+                                SHT::gaunt_rlm_ylm_rlm(this->hubbard_l_, k, this->hubbard_l_, m3, q, m4);
+                        }
+                        // hmmm according to PRB 52, R5467 it is 4
+                        // \pi/(2 k + 1) -> 4 \pi / (4 * k + 1) because
+                        // I only consider a_{k=0} a_{k=2}, a_{k=4}
+                        ak(k/2,
+                           m1 + this->hubbard_l_,
+                           m2 + this->hubbard_l_,
+                           m3 + this->hubbard_l_,
+                           m4 + this->hubbard_l_) = 4.0 * sum * M_PI / static_cast<double>(2 * k + 1);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// this function computes the matrix elements of the orbital part of
+/// the electron-electron interactions. we effectively compute
+
+/// \f[ u(m,m'',m',m''') = \left<m,m''|V_{e-e}|m',m'''\right> \sum_k
+/// a_k(m,m',m'',m''') F_k \f] where the F_k are calculated for real
+/// spherical harmonics
+
+
+
+void Atom_type::compute_hubbard_matrix()
+{
+  this->hubbard_matrix_ = mdarray<double, 4>(2 * this->hubbard_l_ + 1,
+                                             2 * this->hubbard_l_ + 1,
+                                             2 * this->hubbard_l_ + 1,
+                                             2 * this->hubbard_l_ + 1);
+  mdarray<double, 5> ak(this->hubbard_l_,
+                        2 * this->hubbard_l_ + 1,
+                        2 * this->hubbard_l_ + 1,
+                        2 * this->hubbard_l_ + 1,
+                        2 * this->hubbard_l_ + 1);
+  std::vector<double> F(4);
+  hubbard_F_coefficients(&F[0]);
+  calculate_ak_coefficients(ak);
+
+
+  // the indices are rotated around
+
+  // <m, m |vee| m'', m'''> = hubbard_matrix(m, m'', m', m''')
+  this->hubbard_matrix_.zero();
+  for(int m1 = 0; m1 < 2 * this->hubbard_l_ + 1; m1++) {
+    for(int m2 = 0; m2 < 2 * this->hubbard_l_ + 1; m2++) {
+      for(int m3 = 0; m3 < 2 * this->hubbard_l_ + 1; m3++) {
+        for(int m4 = 0; m4 < 2 * this->hubbard_l_ + 1; m4++) {
+          for(int k = 0; k < hubbard_l_; k++)
+            this->hubbard_matrix(m1, m3, m2, m4) += ak (k, m1, m2, m3, m4) * F[k];
+        }
+      }
+    }
+  }
+
+  set_hubbard_l_and_n_orbital();
+  set_occupancy_hubbard_orbital(-1.0);
+}
+
+void Atom_type::read_hubbard_input()
+{
+    if(!parameters_.Hubbard().hubbard_correction_) {
+        return;
+    }
+
+    for(auto &d: parameters_.Hubbard().species) {
+        if (d.first == symbol_) {
+            hubbard_coefficients_[0] = d.second[0];
+            hubbard_coefficients_[1] = d.second[1];
+            hubbard_coefficients_[2] = d.second[2];
+            hubbard_coefficients_[3] = d.second[3];
+            hubbard_alpha_ = d.second[4];
+            hubbard_beta_ = d.second[5];
+            starting_magnetization_theta_ = d.second[7];
+            starting_magnetization_phi_ = d.second[8];
+            starting_magnetization_ = d.second[6];
+        }
+    }
+}
 } // namespace
 
 #endif // __ATOM_TYPE_H__
-

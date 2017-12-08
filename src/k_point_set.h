@@ -184,6 +184,10 @@ class K_point_set
             if (ctx_.control().verbosity_ > 0) {
                 print_info();
             }
+
+            if (ctx_.comm().rank() == 0 && ctx_.control().print_memory_usage_) {
+                MEMORY_USAGE_INFO();
+            }
         }
 
         /// Find Fermi energy and band occupation numbers
@@ -223,8 +227,6 @@ class K_point_set
             return max_num_gkvec;
         }
 
-        void force(mdarray<double, 2>& forcek);
-        
         void add_kpoint(double* vk__, double weight__)
         {
             PROFILE("sirius::K_point_set::add_kpoint");
@@ -311,11 +313,6 @@ class K_point_set
         //        kpq[ik].K = vkqr.second;
         //    }
         //}
-
-        inline K_point* k_point(int ik)
-        {
-            return kpoints_[ik].get();
-        }
 
         inline Communicator const& comm() const
         {
@@ -438,7 +435,7 @@ inline void K_point_set::find_band_occupancies()
 
 inline void K_point_set::print_info()
 {
-    if (comm_k_.rank() == 0 && ctx_.blacs_grid().comm().rank() == 0) {
+    if (comm_k_.rank() == 0 && ctx_.comm_band().rank() == 0) {
         printf("\n");
         printf("total number of k-points : %i\n", num_kpoints());
         for (int i = 0; i < 80; i++) {
@@ -456,7 +453,7 @@ inline void K_point_set::print_info()
         printf("\n");
     }
 
-    if (ctx_.blacs_grid().comm().rank() == 0) {
+    if (ctx_.comm_band().rank() == 0) {
         runtime::pstdout pout(comm_k_);
         for (int ikloc = 0; ikloc < spl_num_kpoints().local_size(); ikloc++) {
             int ik = spl_num_kpoints(ikloc);

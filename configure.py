@@ -10,15 +10,15 @@ packages = {
         "options" : []
     },
     "fftw" : {
-        "url"     : "http://www.fftw.org/fftw-3.3.5.tar.gz",
+        "url"     : "http://www.fftw.org/fftw-3.3.7.tar.gz",
         "options" : []
     },
     "gsl" : {
-        "url"     : "ftp://ftp.gnu.org/gnu/gsl/gsl-2.3.tar.gz",
+        "url"     : "ftp://ftp.gnu.org/gnu/gsl/gsl-2.4.tar.gz",
         "options" : ["--disable-shared"]
     },
     "hdf5" : {
-        "url"     : "https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.10/hdf5-1.10.0-patch1/src/hdf5-1.10.0-patch1.tar.gz",
+        "url"     : "https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.10/hdf5-1.10.1/src/hdf5-1.10.1.tar.gz",
         "options" : ["--enable-fortran",
                      "--disable-shared",
                      "--enable-static=yes",
@@ -140,16 +140,15 @@ def configure_package(package_name, platform):
 
 
 def main():
-
-    if "--help" in sys.argv:
+    if len(sys.argv) < 2:
         print("\n" \
               "SIRIUS configuration script\n\n" \
               "First, edit 'platform.json' and specify your system compilers, system libraries and\n" \
               "libraries that you want to install. Then run:\n\n" \
-              "  python configure.py\n\n" \
+              "> python configure.py platform.json\n\n" \
               "The \"install\" element in 'platform.json' contains the list of packages which are currently\n" \
               "missing on your system and which will be downloaded and configured by the script.\n" \
-              "The following package can be specified:\n\n" \
+              "The following packages can be specified:\n\n" \
               "  \"fftw\" - FFTW library\n" \
               "  \"gsl\"  - GNU scientific library\n" \
               "  \"hdf5\" - HDF5 library\n" \
@@ -157,11 +156,11 @@ def main():
               "  \"spg\"  - Spglib\n")
         sys.exit(0)
 
-    fin = open("platform.json", "r");
+    fin = open(sys.argv[1], "r");
     platform = json.load(fin)
     fin.close()
 
-    makeinc = open("make.inc", "w")
+    makeinc = open('make.inc', "w")
 
     makeinc.write('''debug = false
 BASIC_CXX_OPT = -O3 -DNDEBUG
@@ -169,41 +168,59 @@ ifeq ($(debug), true)
   BASIC_CXX_OPT = -O1 -g -ggdb
 endif'''+"\n")
 
-    if "MPI_CXX" in platform:
-        makeinc.write("CXX = " + platform["MPI_CXX"] + "\n")
+    if 'MPI_CXX' in platform:
+        makeinc.write("CXX = %s\n"%platform['MPI_CXX'])
     else:
-        makeinc.write("CXX = " + platform["CXX"] + "\n")
+        makeinc.write("CXX = %s\n"%platform['CXX'])
 
-    if "MPI_CXX_OPT" in platform:
-        makeinc.write("CXX_OPT = $(BASIC_CXX_OPT) " + platform["MPI_CXX_OPT"] + "\n")
+    if 'MPI_CXX_OPT' in platform:
+        makeinc.write("CXX_OPT = $(BASIC_CXX_OPT) %s\n"%platform['MPI_CXX_OPT'])
     else:
-        makeinc.write("CXX_OPT = $(BASIC_CXX_OPT) " + platform["CXX_OPT"] + "\n")
+        makeinc.write("CXX_OPT = $(BASIC_CXX_OPT) %s\n"%platform['CXX_OPT'])
+    
+    makeinc.write("CXX_OPT := $(CXX_OPT) -I%s/src\n"%os.getcwd())
+    makeinc.write("CXX_OPT := $(CXX_OPT) -I%s/src/SDDK\n"%os.getcwd())
+    if 'CUDA_ROOT' in platform:
+        makeinc.write("CXX_OPT := $(CXX_OPT) -I%s/include\n"%platform['CUDA_ROOT']);
 
-    if "NVCC" in platform: makeinc.write("NVCC = " + platform["NVCC"] + "\n")
-    if "NVCC_OPT" in platform: makeinc.write("NVCC_OPT = " + platform["NVCC_OPT"] + "\n")
+    if 'MAGMA_ROOT' in platform:
+        makeinc.write("CXX_OPT := $(CXX_OPT) -I%s/include\n"%platform['MAGMA_ROOT']);
+        makeinc.write("CXX_OPT := $(CXX_OPT) -I%s/control\n"%platform['MAGMA_ROOT']);
 
-    if "MPI_FC" in platform: makeinc.write("MPI_FC = " + platform["MPI_FC"] + "\n")
-    if "MPI_FC_OPT" in platform: makeinc.write("MPI_FC_OPT = " + platform["MPI_FC_OPT"] + "\n")
+
+    if 'CUDA_ROOT' in platform:
+        if 'NVCC' in platform: 
+            makeinc.write("NVCC = %s/bin/%s\n"%(platform['CUDA_ROOT'], platform['NVCC']))
+        if 'NVCC_OPT' in platform: 
+            makeinc.write("NVCC_OPT = %s\n"%platform['NVCC_OPT'])
+
+    if 'MPI_FC' in platform:
+        makeinc.write("MPI_FC = %s\n"%platform['MPI_FC'])
+    if 'MPI_FC_OPT' in platform:
+        makeinc.write("MPI_FC_OPT = %s\n"%platform['MPI_FC_OPT'])
 
     make_packages = []
     clean_packages = []
 
-    makeinc.write("CXX_OPT := $(CXX_OPT) -I" + os.getcwd() + "/src\n")
-    makeinc.write("CXX_OPT := $(CXX_OPT) -I" + os.getcwd() + "/src/SDDK\n")
-
-    if "install" in platform:
-        for name in platform["install"]:
+    if 'install' in platform:
+        for name in platform['install']:
             opts = configure_package(name, platform)
-            makeinc.write("CXX_OPT := $(CXX_OPT) " + opts[0] + "\n")
-            makeinc.write("LIBS := $(LIBS) " + opts[1] + "\n")
+            makeinc.write("CXX_OPT := $(CXX_OPT) %s\n"%opts[0])
+            makeinc.write("LIBS := $(LIBS) %s\n"%opts[1])
             make_packages.append(opts[2])
             clean_packages.append(opts[3])
 
-    build_elpa = False
-    if "-D__ELPA" in platform["MPI_CXX_OPT"]:
-        build_elpa = True
-        makeinc.write("LIBS := $(LIBS) " + os.getcwd() + "/libs/elpa/latest/libelpa.a\n")
+    #build_elpa = False
+    #if "-D__ELPA" in platform['MPI_CXX_OPT']:
+    #    build_elpa = True
+    #    makeinc.write("LIBS := $(LIBS) %s/libs/elpa/latest/libelpa.a\n"%os.getcwd())
 
+    if 'CUDA_ROOT' in platform:
+        makeinc.write("LIBS := $(LIBS) -L%s/lib -lcublas -lcudart -lcufft -lcusparse -lnvToolsExt -Wl,-rpath,%s/lib  \n"%(platform['CUDA_ROOT'], platform['CUDA_ROOT']))
+    if 'MAGMA_ROOT' in platform:
+        makeinc.write("LIBS := $(LIBS) %s/lib/libmagma_sparse.a\n"%platform['MAGMA_ROOT']) 
+        makeinc.write("LIBS := $(LIBS) %s/lib/libmagma.a\n"%platform['MAGMA_ROOT']) 
+        
     makeinc.write("LIBS := $(LIBS) " + platform["SYSTEM_LIBS"] + "\n")
 
     dbg_conf = False
@@ -241,12 +258,12 @@ endif'''+"\n")
     makef.write("packages:\n")
     for i in range(len(make_packages)):
         makef.write(make_packages[i])
-    if build_elpa: makef.write("\tcd ./libs/elpa/latest; make\n")
+    #if build_elpa: makef.write("\tcd ./libs/elpa/latest; make\n")
 
     makef.write("cleanall:\n")
     for i in range(len(clean_packages)):
         makef.write(clean_packages[i])
-    if build_elpa: makef.write("\tcd ./libs/elpa/latest; make clean\n")
+    #if build_elpa: makef.write("\tcd ./libs/elpa/latest; make clean\n")
 
     makef.write("\n")
     makef.write("clean:\n")

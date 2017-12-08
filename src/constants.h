@@ -26,7 +26,7 @@
 #define __CONSTANTS_H__
 
 const int major_version = 4;
-const int minor_version = 5;
+const int minor_version = 10;
 
 /// NIST value for the inverse fine structure (http://physics.nist.gov/cuu/Constants/index.html)
 const double speed_of_light = 137.035999139; 
@@ -53,6 +53,26 @@ const double y00 = 0.28209479177387814347;
 const double ha2ev = 27.21138505;
 
 const char* const storage_file_name = "sirius.h5";
+
+/// Pauli matrices in {I, Z, X, Y} order.
+const std::complex<double> pauli_matrix[4][2][2] = {
+    {
+        {1.0, 0.0},
+        {0.0, 1.0}
+    },
+    {
+        {1.0, 0.0},
+        {0.0, -1.0}
+    },
+    {
+        {0.0, 1.0},
+        {1.0, 0.0}
+    },
+    {
+        {0.0, std::complex<double>(0, -1)},
+        {std::complex<double>(0, 1), 0.0}
+    }
+};
 
 #endif // __CONSTANTS_H__
 

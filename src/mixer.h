@@ -144,7 +144,9 @@ class Mixer
                 spl_shared_local_size_ = spl_shared_size_.local_size();
             }
             local_size_ = spl_shared_local_size_ + local_vector_size_;
-
+            if (local_size_ == 0) {
+                TERMINATE("Ratio between gk_cutoff and pw_cutoff is exactly 2\n");
+            }
             /* allocate input buffer */
             input_buffer_ = mdarray<T, 1>(local_size_, memory_t::host, "Mixer::input_buffer_");
             /* allocate output bffer */
@@ -207,7 +209,7 @@ class Mixer
             return rss_;
         }
             
-        virtual double mix() = 0;
+        virtual double mix(double rss_min__) = 0;
 };
 
 /// Primitive linear mixer.
@@ -225,12 +227,12 @@ class Linear_mixer: public Mixer<T>
                      int                 local_vector_size__,
                      double              beta0__,
                      Communicator const& comm__) 
-            : Mixer<T>(shared_vector_size__, local_vector_size__, 2, beta0__, comm__),
-              beta0_(beta0__)
+            : Mixer<T>(shared_vector_size__, local_vector_size__, 2, beta0__, comm__)
+            , beta0_(beta0__)
         {
         }
 
-        double mix()
+        double mix(double rss_min__)
         {
             double rms = this->rms_deviation();
             this->count_++;
@@ -263,7 +265,7 @@ class Broyden1: public Mixer<T>
             residuals_ = mdarray<T, 2>(this->local_size_, max_history__);
         }
 
-        double mix()
+        double mix(double rss_min__)
         {
             PROFILE("sirius::Broyden1::mix");
 
@@ -279,7 +281,19 @@ class Broyden1: public Mixer<T>
             this->comm_.allreduce(&this->rss_, 1);
 
             /* exit if the vector has converged */
-            if (this->rss_ < 1e-11) {
+            if (this->rss_ < rss_min__) {
+                
+                /* Warning: if the vector has converged to this degree, it will not be mixed;
+                 * the output buffer will contain the vector of the previous step */
+
+                //int i1 = this->idx_hist(this->count_);
+                ///* copy input to output */
+                //for (int i = 0; i < this->local_size_; i++) {
+                //    this->vectors_(i, i1) = this->input_buffer_(i);
+                //}
+
+                //this->comm_.allgather(&this->vectors_(0, i1), this->output_buffer_.template at<CPU>(),
+                //                      this->spl_shared_size_.global_offset(), this->spl_shared_size_.local_size());
                 return 0.0;
             }
 
@@ -304,7 +318,7 @@ class Broyden1: public Mixer<T>
                             T dr1 = residuals_(i, i1) - residuals_(i, i2);
                             T dr2 = residuals_(i, i3) - residuals_(i, i4);
 
-                            S(j1, j2) += type_wrapper<T>::real(type_wrapper<T>::conjugate(dr1) * dr2) * this->weights_(i);
+                            S(j1, j2) += std::real(std::conj(dr1) * dr2) * this->weights_(i);
                         }
                         S(j2, j1) = S(j1, j2);
                     }
@@ -341,7 +355,7 @@ class Broyden1: public Mixer<T>
                     int i2 = this->idx_hist(this->count_ - j - 1);
                     for (int i = 0; i < this->local_size_; i++) {
                         T dr = residuals_(i, i1) - residuals_(i, i2);
-                        c(j) += type_wrapper<T>::real(type_wrapper<T>::conjugate(dr) * residuals_(i, ipos)) * this->weights_(i);
+                        c(j) += std::real(std::conj(dr) * residuals_(i, ipos)) * this->weights_(i);
                     }
                 }
                 this->comm_.allreduce(c.at<CPU>(), (int)c.size());
@@ -404,14 +418,14 @@ class Broyden2: public Mixer<T>
                  double              beta0__,
                  double              linear_mix_rms_tol__,
                  Communicator const& comm__) 
-            : Mixer<T>(shared_vector_size__, local_vector_size__, max_history__, beta__, comm__),
-              beta0_(beta0__),
-              linear_mix_rms_tol_(linear_mix_rms_tol__)
+            : Mixer<T>(shared_vector_size__, local_vector_size__, max_history__, beta__, comm__)
+            , beta0_(beta0__)
+            , linear_mix_rms_tol_(linear_mix_rms_tol__)
         {
             residuals_ = mdarray<T, 2>(this->local_size_, max_history__);
         }
 
-        double mix()
+        double mix(double rss_min__)
         {
             PROFILE("sirius::Broyden2::mix");
 
@@ -429,7 +443,7 @@ class Broyden2: public Mixer<T>
             this->comm_.allreduce(&this->rss_, 1);
 
             /* exit if the vector has converged */
-            if (this->rss_ < 1e-11) {
+            if (this->rss_ < rss_min__) {
                 return 0.0;
             }
 
@@ -451,7 +465,7 @@ class Broyden2: public Mixer<T>
                     for (int j2 = 0; j2 <= j1; j2++) {
                         int i2 = this->idx_hist(this->count_ - N + j2);
                         for (int i = 0; i < this->local_size_; i++) {
-                            S(j1, j2) += type_wrapper<T>::real(type_wrapper<T>::conjugate(residuals_(i, i1)) * residuals_(i, i2));
+                            S(j1, j2) += std::real(std::conj(residuals_(i, i1)) * residuals_(i, i2));
                         }
                         S(j2, j1) = S(j1, j2);
                     }

@@ -34,7 +34,24 @@
 
 using double_complex = std::complex<double>;
 
-enum class spin_block_t {nm, uu, ud, dd, du};
+/// Spin-blocks of the Hamiltonian.
+enum class spin_block_t 
+{
+    /// Non-magnetic case.
+    nm,
+
+    /// Up-up block.
+    uu,
+
+    /// Down-donw block.
+    dd,
+
+    ///Up-down block.
+    ud, 
+
+    /// Down-up block.
+    du
+};
 
 /// Type of electronic structure methods.
 enum class electronic_structure_method_t 
@@ -72,21 +89,6 @@ class type_wrapper<double>
         typedef std::complex<double> complex_t;
         typedef double real_t;
         
-        static hid_t hdf5_type_id()
-        {
-            return H5T_NATIVE_DOUBLE;
-        }
-        
-        static inline double conjugate(double const& v)
-        {
-            return v;
-        }
-
-        static inline double real(double const& v)
-        {
-            return v;
-        }
-
         static bool is_complex()
         {
             return false;
@@ -101,6 +103,11 @@ class type_wrapper<double>
         {
             return static_cast<double>(rnd()) / std::numeric_limits<uint32_t>::max();
             //return double(std::rand()) / RAND_MAX;
+        }
+
+        static real_t bypass(complex_t val__)
+        {
+            return val__.real();
         }
 };
 
@@ -137,21 +144,6 @@ class type_wrapper<double_complex>
         typedef double_complex complex_t;
         typedef double real_t;
         
-        static inline double_complex conjugate(double_complex const& v)
-        {
-            return std::conj(v);
-        }
-
-        static inline double real(double_complex const& v)
-        {
-            return v.real();
-        }
-        
-        static hid_t hdf5_type_id()
-        {
-            return H5T_NATIVE_LDOUBLE;
-        }
-        
         static bool is_complex()
         {
             return true;
@@ -169,28 +161,12 @@ class type_wrapper<double_complex>
             double y = static_cast<double>(rnd()) / std::numeric_limits<uint32_t>::max();
             return std::complex<double>(x, y);
         }
-};
 
-template<> 
-class type_wrapper<int>
-{
-    public:
-        static hid_t hdf5_type_id()
+        static complex_t bypass(complex_t val__)
         {
-            return H5T_NATIVE_INT;
+            return val__;
         }
 };
-
-//template<> 
-//class type_wrapper<char>
-//{
-//    public:
-//
-//        static inline char random()
-//        {
-//            return static_cast<char>(255 * (double(std::rand()) / RAND_MAX));
-//        }
-//};
 
 enum class relativity_t
 {
@@ -204,6 +180,5 @@ enum class relativity_t
 
     dirac
 };
-
 
 #endif // __TYPEDEFS_H__

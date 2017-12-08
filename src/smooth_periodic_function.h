@@ -36,7 +36,6 @@ namespace sirius {
  *    - distribution of plane-wave coefficients over entire communicator
  *    - Fourier transformation using FFT communicator
  *    - gather PW coefficients into global array
- *  In some cases the PW coefficients are not necessary and only the real-space values are stored.
  */
 template <typename T>
 class Smooth_periodic_function
@@ -48,10 +47,10 @@ class Smooth_periodic_function
 
         /// Distribution of G-vectors.
         Gvec const* gvec_{nullptr};
-        
+
         /// Function on the regular real-space grid.
         mdarray<T, 1> f_rg_;
-        
+
         /// Local set of plane-wave expansion coefficients.
         mdarray<double_complex, 1> f_pw_local_;
 
@@ -60,7 +59,7 @@ class Smooth_periodic_function
 
         /// Distribution of G-vectors inside FFT slab.
         block_data_descriptor gvec_fft_slab_;
-        
+
         /// Gather plane-wave coefficients for the subsequent FFT call.
         inline void gather_f_pw_fft()
         {
@@ -74,7 +73,7 @@ class Smooth_periodic_function
         }
 
     public:
-        
+
         /// Default constructor.
         Smooth_periodic_function() 
         {
@@ -84,9 +83,9 @@ class Smooth_periodic_function
             : fft_(&fft__)
             , gvec_(&gvec__)
         {
-            f_rg_       = mdarray<T, 1>(fft_->local_size());
-            f_pw_fft_   = mdarray<double_complex, 1>(gvec_->partition().gvec_count_fft());
-            f_pw_local_ = mdarray<double_complex, 1>(gvec_->count());
+            f_rg_       = mdarray<T, 1>(fft_->local_size(), memory_t::host, "Smooth_periodic_function.f_rg_");
+            f_pw_fft_   = mdarray<double_complex, 1>(gvec_->partition().gvec_count_fft(), memory_t::host, "Smooth_periodic_function.f_pw_fft_");
+            f_pw_local_ = mdarray<double_complex, 1>(gvec_->count(), memory_t::host, "Smooth_periodic_function.f_pw_local_");
 
             /* check ordering of mpi ranks */
             int rank = fft_->comm().rank() * gvec_->comm_ortho_fft().size() + gvec_->comm_ortho_fft().rank();
@@ -115,7 +114,7 @@ class Smooth_periodic_function
         {
             return f_rg_(ir__);
         }
-        
+
         inline double_complex& f_pw_local(int ig__)
         {
             return f_pw_local_(ig__);
@@ -168,13 +167,13 @@ class Smooth_periodic_function
             switch (direction__) {
                 case 1: {
                     gather_f_pw_fft();
-                    fft_->transform<1>(gvec_->partition(), f_pw_fft_.at<CPU>());
+                    fft_->transform<1>(f_pw_fft_.at<CPU>());
                     fft_->output(f_rg_.template at<CPU>());
                     break;
                 }
                 case -1: {
                     fft_->input(f_rg_.template at<CPU>());
-                    fft_->transform<-1>(gvec_->partition(), f_pw_fft_.at<CPU>());
+                    fft_->transform<-1>(f_pw_fft_.at<CPU>());
                     int count  = gvec_fft_slab_.counts[gvec_->comm_ortho_fft().rank()];
                     int offset = gvec_fft_slab_.offsets[gvec_->comm_ortho_fft().rank()];
                     std::memcpy(f_pw_local_.at<CPU>(), f_pw_fft_.at<CPU>(offset), count * sizeof(double_complex));
@@ -202,6 +201,52 @@ class Smooth_periodic_function
         {
             std::copy(&f_pw__[gvec_->offset()], &f_pw__[gvec_->offset()] + gvec_->count(), &f_pw_local_(0));
         }
+
+        void add(Smooth_periodic_function<T> const& g__)
+        {
+            #pragma omp parallel for schedule(static)
+            for (int irloc = 0; irloc < this->fft_->local_size(); irloc++) {
+                this->f_rg_(irloc) += g__.f_rg(irloc);
+            }
+        }
+
+        inline T checksum_rg() const
+        {
+            T cs = this->f_rg_.checksum();
+            this->fft_->comm().allreduce(&cs, 1);
+            return cs;
+        }
+
+        /// Compute inner product <f|g>
+        T inner(Smooth_periodic_function<T> const& g__) const
+        {
+            PROFILE("sirius::Periodic_function::inner");
+
+            assert(this->fft_ == g__.fft_);
+
+            T result_rg{0};
+
+            #pragma omp parallel
+            {
+                T rt{0};
+
+                #pragma omp for schedule(static)
+                for (int irloc = 0; irloc < this->fft_->local_size(); irloc++) {
+                    rt += type_wrapper<T>::bypass(std::conj(this->f_rg(irloc))) * g__.f_rg(irloc);
+                }
+
+                #pragma omp critical
+                result_rg += rt;
+            }
+            double omega = std::pow(twopi, 3) / std::abs(this->gvec_->lattice_vectors().det());
+
+            result_rg *= (omega / this->fft_->size());
+
+            this->fft_->comm().allreduce(&result_rg, 1);
+
+            return result_rg;
+        }
+
 };
 
 /// Gradient of the smooth periodic function.
@@ -215,7 +260,7 @@ class Smooth_periodic_function_gradient
 
         /// Distribution of G-vectors.
         Gvec const* gvec_{nullptr};
-        
+
         std::array<Smooth_periodic_function<T>, 3> grad_f_;
 
     public:
@@ -271,7 +316,7 @@ inline Smooth_periodic_function_gradient<double> gradient(Smooth_periodic_functi
 inline Smooth_periodic_function<double> laplacian(Smooth_periodic_function<double>& f__)
 {
     Smooth_periodic_function<double> g(f__.fft(), f__.gvec());
-    
+
     #pragma omp parallel for
     for (int igloc = 0; igloc < f__.gvec().count(); igloc++) {
         int ig = f__.gvec().offset() + igloc;
@@ -289,7 +334,7 @@ Smooth_periodic_function<T> operator*(Smooth_periodic_function_gradient<T>& grad
 {
     assert(&grad_f__.fft() == &grad_g__.fft());
     assert(&grad_f__.gvec() == &grad_g__.gvec());
-    
+
     Smooth_periodic_function<T> result(grad_f__.fft(), grad_f__.gvec());
 
     #pragma omp parallel for
