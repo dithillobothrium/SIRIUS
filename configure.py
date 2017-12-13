@@ -233,6 +233,7 @@ endif'''+"\n")
     
     if dbg_conf:
         makeinc.write("CXX_OPT_DBG := $(CXX_OPT_DBG) -I" + os.getcwd() + "/src\n")
+        makeinc.write("CXX_OPT_DBG := $(CXX_OPT_DBG) -I" + os.getcwd() + "/src/SDDK\n")
 
         if "install" in platform:
             for name in platform["install"]:

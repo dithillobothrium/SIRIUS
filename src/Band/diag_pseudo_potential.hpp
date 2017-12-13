@@ -11,63 +11,67 @@ extern "C" void compute_chebyshev_polynomial_gpu(int num_gkvec,
 template <typename T>
 inline void Band::diag_pseudo_potential_exact(K_point* kp__,
                                               int ispn__,
+                                              Hamiltonian &H_,
                                               D_operator<T>& d_op__,
                                               Q_operator<T>& q_op__) const
 {
     PROFILE("sirius::Band::diag_pseudo_potential_exact");
 
-    /* short notation for target wave-functions */
-    auto& psi = kp__->spinor_wave_functions(ispn__);
+    STOP();
 
-    /* short notation for number of target wave-functions */
-    int num_bands = ctx_.num_fv_states();     
-
-    int ngk = kp__->num_gkvec();
-
-    /* number of spin components, treated simultaneously */
-    int nsc = (ctx_.num_mag_dims() == 3) ? 2 : 1;
-
-    Wave_functions  phi(ctx_.processing_unit(), kp__->gkvec(), ngk, nsc);
-    Wave_functions hphi(ctx_.processing_unit(), kp__->gkvec(), ngk, nsc);
-    Wave_functions ophi(ctx_.processing_unit(), kp__->gkvec(), ngk, nsc);
-    
-    std::vector<double> eval(ngk);
-
-    phi.component(0).pw_coeffs().prime().zero();
-    for (int i = 0; i < ngk; i++) {
-        phi.component(0).pw_coeffs().prime(i, i) = 1;
-    }
-
-    apply_h_o(kp__, ispn__, 0, ngk, phi, hphi, ophi, d_op__, q_op__);
-        
-    //Utils::check_hermitian("h", hphi.coeffs(), ngk);
-    //Utils::check_hermitian("o", ophi.coeffs(), ngk);
-
-    #ifdef __PRINT_OBJECT_CHECKSUM
-    auto z1 = hphi.pw_coeffs().prime().checksum();
-    auto z2 = ophi.pw_coeffs().prime().checksum();
-    printf("checksum(h): %18.10f %18.10f\n", z1.real(), z1.imag());
-    printf("checksum(o): %18.10f %18.10f\n", z2.real(), z2.imag());
-    #endif
-
-    auto gen_solver = ctx_.gen_evp_solver<double_complex>();
-    
-    TERMINATE("fix this later");
-    dmatrix<double_complex> hmlt(hphi[0].pw_coeffs().prime().template at<CPU>(), ngk, ngk);
-    dmatrix<double_complex> ovlp(ophi[0].pw_coeffs().prime().template at<CPU>(), ngk, ngk);
-    dmatrix<double_complex> Z(psi.pw_coeffs().prime().template at<CPU>(), ngk, ngk);
-
-    if (gen_solver->solve(ngk, num_bands, hmlt, ovlp, &eval[0], Z)) {
-        TERMINATE("error in evp solve");
-    }
-
-    for (int j = 0; j < ctx_.num_fv_states(); j++) {
-        kp__->band_energy(j + ispn__ * ctx_.num_fv_states()) = eval[j];
-    }
+//    /* short notation for target wave-functions */
+//    auto& psi = kp__->spinor_wave_functions(ispn__);
+//
+//    /* short notation for number of target wave-functions */
+//    int num_bands = ctx_.num_fv_states();     
+//
+//    int ngk = kp__->num_gkvec();
+//
+//    /* number of spin components, treated simultaneously */
+//    int nsc = (ctx_.num_mag_dims() == 3) ? 2 : 1;
+//
+//    Wave_functions  phi(ctx_.processing_unit(), kp__->gkvec(), ngk, nsc);
+//    Wave_functions hphi(ctx_.processing_unit(), kp__->gkvec(), ngk, nsc);
+//    Wave_functions ophi(ctx_.processing_unit(), kp__->gkvec(), ngk, nsc);
+//    
+//    std::vector<double> eval(ngk);
+//
+//    phi.component(0).pw_coeffs().prime().zero();
+//    for (int i = 0; i < ngk; i++) {
+//        phi.component(0).pw_coeffs().prime(i, i) = 1;
+//    }
+//
+//    H__.apply_h_s(kp__, ispn__, 0, ngk, phi, hphi, ophi, d_op__, q_op__);
+//        
+//    //Utils::check_hermitian("h", hphi.coeffs(), ngk);
+//    //Utils::check_hermitian("o", ophi.coeffs(), ngk);
+//
+//    #ifdef __PRINT_OBJECT_CHECKSUM
+//    auto z1 = hphi.pw_coeffs().prime().checksum();
+//    auto z2 = ophi.pw_coeffs().prime().checksum();
+//    printf("checksum(h): %18.10f %18.10f\n", z1.real(), z1.imag());
+//    printf("checksum(o): %18.10f %18.10f\n", z2.real(), z2.imag());
+//    #endif
+//
+//    auto gen_solver = ctx_.gen_evp_solver<double_complex>();
+//    
+//    TERMINATE("fix this later");
+//    dmatrix<double_complex> hmlt(hphi[0].pw_coeffs().prime().template at<CPU>(), ngk, ngk);
+//    dmatrix<double_complex> ovlp(ophi[0].pw_coeffs().prime().template at<CPU>(), ngk, ngk);
+//    dmatrix<double_complex> Z(psi.pw_coeffs().prime().template at<CPU>(), ngk, ngk);
+//
+//    if (gen_solver->solve(ngk, num_bands, hmlt, ovlp, &eval[0], Z)) {
+//        TERMINATE("error in evp solve");
+//    }
+//
+//    for (int j = 0; j < ctx_.num_fv_states(); j++) {
+//        kp__->band_energy(j + ispn__ * ctx_.num_fv_states()) = eval[j];
+//    }
 }
 
 template <typename T>
 inline int Band::diag_pseudo_potential_davidson(K_point*       kp__,
+                                                Hamiltonian&   H__,
                                                 D_operator<T>& d_op__,
                                                 Q_operator<T>& q_op__) const
 {
@@ -82,27 +86,28 @@ inline int Band::diag_pseudo_potential_davidson(K_point*       kp__,
     bool converge_by_energy = (itso.converge_by_energy_ == 1);
 
     if (ctx_.control().verbosity_ >= 2 && kp__->comm().rank() == 0) {
-        DUMP("iterative solver tolerance: %18.12f", ctx_.iterative_solver_tolerance());
+        printf("iterative solver tolerance: %18.12f\n", ctx_.iterative_solver_tolerance());
     }
+
+    /* true if this is a non-collinear case */
+    bool nc_mag = (ctx_.num_mag_dims() == 3);
 
     /* number of spin components, treated simultaneously 
      *   1 - in case of non-magnetic or collinear calculation
      *   2 - in case of non-collinear calculation
      */
-    int num_sc = (ctx_.num_mag_dims() == 3) ? 2 : 1;
+    int num_sc = nc_mag ? 2 : 1;
     
     /* number of steps in spin index
      * 1 - in case of non-magnetic calculation
      * 2 - in case of collinear calculation (up, dn) 
-     * 1 - in case of non-collinear calculation (two spins are treated simultaneously)
+     * 1 - in case of non-collinear calculation (two spin components are treated simultaneously)
      */
-    int num_spin_steps = (ctx_.num_mag_dims() == 3) ? 1 : ctx_.num_spins();
+    int num_spin_steps = nc_mag ? 1 : ctx_.num_spins();
 
     /* short notation for number of target wave-functions */
-    int num_bands = (ctx_.num_mag_dims() == 3) ? ctx_.num_bands() : ctx_.num_fv_states();
-
-    bool nc_mag = (ctx_.num_mag_dims() == 3);
-
+    int num_bands = nc_mag ? ctx_.num_bands() : ctx_.num_fv_states();
+    
     /* short notation for target wave-functions */
     auto& psi = kp__->spinor_wave_functions();
 
@@ -116,30 +121,36 @@ inline int Band::diag_pseudo_potential_davidson(K_point*       kp__,
         s << "subspace size is too large!";
         TERMINATE(s);
     }
-    
+
     /* total memory size of all wave-functions */
     size_t size = sizeof(double_complex) * num_sc * kp__->num_gkvec_loc() * (3 * num_phi + 3 * num_bands);
     /* get preallocatd memory buffer */
     double_complex* mem_buf_ptr = static_cast<double_complex*>(ctx_.memory_buffer(size));
 
     /* allocate wave-functions */
-    Wave_functions  phi(mem_buf_ptr, ctx_.processing_unit(), kp__->gkvec(), num_phi, num_sc);
+
+    /* auxiliary wave-functions */
+    Wave_functions phi(mem_buf_ptr, kp__->gkvec(), num_phi, num_sc);
     mem_buf_ptr += kp__->num_gkvec_loc() * num_phi * num_sc;
 
-    Wave_functions hphi(mem_buf_ptr, ctx_.processing_unit(), kp__->gkvec(), num_phi, num_sc);
+    /* Hamiltonian, applied to auxiliary wave-functions */
+    Wave_functions hphi(mem_buf_ptr, kp__->gkvec(), num_phi, num_sc);
     mem_buf_ptr += kp__->num_gkvec_loc() * num_phi * num_sc;
 
-    Wave_functions ophi(mem_buf_ptr, ctx_.processing_unit(), kp__->gkvec(), num_phi, num_sc);
+    /* S operator, applied to auxiliary wave-functions */
+    Wave_functions sphi(mem_buf_ptr, kp__->gkvec(), num_phi, num_sc);
     mem_buf_ptr += kp__->num_gkvec_loc() * num_phi * num_sc;
 
-    Wave_functions hpsi(mem_buf_ptr, ctx_.processing_unit(), kp__->gkvec(), num_bands, num_sc);
+    /* Hamiltonain, applied to new Psi wave-functions */
+    Wave_functions hpsi(mem_buf_ptr, kp__->gkvec(), num_bands, num_sc);
     mem_buf_ptr += kp__->num_gkvec_loc() * num_bands * num_sc;
 
-    Wave_functions opsi(mem_buf_ptr, ctx_.processing_unit(), kp__->gkvec(), num_bands, num_sc);
+    /* S operator, applied to new Psi wave-functions */
+    Wave_functions spsi(mem_buf_ptr, kp__->gkvec(), num_bands, num_sc);
     mem_buf_ptr += kp__->num_gkvec_loc() * num_bands * num_sc;
 
     /* residuals */
-    Wave_functions res(mem_buf_ptr, ctx_.processing_unit(), kp__->gkvec(), num_bands, num_sc);
+    Wave_functions res(mem_buf_ptr, kp__->gkvec(), num_bands, num_sc);
     t1.stop();
 
     sddk::timer t2("sirius::Band::diag_pseudo_potential_davidson|alloc");
@@ -159,21 +170,21 @@ inline int Band::diag_pseudo_potential_davidson(K_point*       kp__,
     if (ctx_.processing_unit() == GPU) {
         if (!keep_wf_on_gpu) {
             for (int ispn = 0; ispn < ctx_.num_spins(); ispn++) {
-                psi.component(ispn).pw_coeffs().allocate_on_device();
-                psi.component(ispn).pw_coeffs().copy_to_device(0, num_bands);
+                psi.pw_coeffs(ispn).allocate_on_device();
+                psi.pw_coeffs(ispn).copy_to_device(0, num_bands);
             }
         }
         for (int i = 0; i < num_sc; i++) {
-            phi.component(i).pw_coeffs().allocate_on_device();
-            res.component(i).pw_coeffs().allocate_on_device();
+            phi.pw_coeffs(i).allocate_on_device();
+            res.pw_coeffs(i).allocate_on_device();
 
-            hphi.component(i).pw_coeffs().allocate_on_device();
-            ophi.component(i).pw_coeffs().allocate_on_device();
+            hphi.pw_coeffs(i).allocate_on_device();
+            sphi.pw_coeffs(i).allocate_on_device();
 
-            hpsi.component(i).pw_coeffs().allocate_on_device();
-            opsi.component(i).pw_coeffs().allocate_on_device();
+            hpsi.pw_coeffs(i).allocate_on_device();
+            spsi.pw_coeffs(i).allocate_on_device();
         }
-    
+
         if (ctx_.blacs_grid().comm().size() == 1) {
             evec.allocate(memory_t::device);
             ovlp.allocate(memory_t::device);
@@ -188,8 +199,8 @@ inline int Band::diag_pseudo_potential_davidson(K_point*       kp__,
     t2.stop();
 
     /* get diagonal elements for preconditioning */
-    auto h_diag = get_h_diag(kp__, *local_op_, d_op__);
-    auto o_diag = get_o_diag(kp__, q_op__);
+    auto h_diag = H__.get_h_diag(kp__, d_op__);
+    auto o_diag = H__.get_o_diag(kp__, q_op__);
 
     if (ctx_.control().print_checksum_) {
         auto cs1 = h_diag.checksum();
@@ -206,7 +217,7 @@ inline int Band::diag_pseudo_potential_davidson(K_point*       kp__,
     auto gen_solver = ctx_.gen_evp_solver<T>();
 
     int niter{0};
-    
+
     sddk::timer t3("sirius::Band::diag_pseudo_potential_davidson|iter");
     for (int ispin_step = 0; ispin_step < num_spin_steps; ispin_step++) {
 
@@ -215,21 +226,43 @@ inline int Band::diag_pseudo_potential_davidson(K_point*       kp__,
 
         /* trial basis functions */
         for (int ispn = 0; ispn < num_sc; ispn++) {
-            phi.component(ispn).copy_from(psi.component(ctx_.num_mag_dims() == 3 ? ispn : ispin_step), 0, num_bands, ctx_.processing_unit());
+            phi.copy_from(ctx_.processing_unit(), num_bands, psi, nc_mag ? ispn : ispin_step, 0, ispn, 0);
         }
 
         /* fisrt phase: setup and diagonalize reduced Hamiltonian and get eigen-values;
          * this is done before the main itertive loop */
 
-        /* apply Hamiltonian and overlap operators to the basis functions */
-        apply_h_o<T>(kp__, ispin_step, 0, num_bands, phi, hphi, ophi, d_op__, q_op__);
-        
+        /* apply Hamiltonian and S operators to the basis functions */
+        H__.apply_h_s<T>(kp__, nc_mag ? 2 : ispin_step, 0, num_bands, phi, hphi, sphi, d_op__, q_op__);
+
         /* setup eigen-value problem
          * N is the number of previous basis functions
          * n is the number of new basis functions */
         set_subspace_mtrx(0, num_bands, phi, hphi, hmlt, hmlt_old);
         /* setup overlap matrix */
-        set_subspace_mtrx(0, num_bands, phi, ophi, ovlp, ovlp_old);
+        set_subspace_mtrx(0, num_bands, phi, sphi, ovlp, ovlp_old);
+
+        if (ctx_.control().verification_ >= 1) {
+            double max_diff = check_hermitian(hmlt, num_bands);
+            if (max_diff > 1e-12) {
+                std::stringstream s;
+                s << "H matrix is not hermitian, max_err = " << max_diff;
+                WARNING(s);
+            }
+            max_diff = check_hermitian(ovlp, num_bands);
+            if (max_diff > 1e-12) {
+                std::stringstream s;
+                s << "S matrix is not hermitian, max_err = " << max_diff;
+                WARNING(s);
+            }
+
+            if (ctx_.control().verification_ >= 2) {
+                hmlt.serialize("H matrix", num_bands);
+            }
+            if (ctx_.control().verification_ >= 2) {
+                ovlp.serialize("S matrix", num_bands);
+            }
+        }
 
         /* current subspace size */
         int N = num_bands;
@@ -258,8 +291,8 @@ inline int Band::diag_pseudo_potential_davidson(K_point*       kp__,
             /* don't compute residuals on last iteration */
             if (k != itso.num_steps_ - 1) {
                 /* get new preconditionined residuals, and also hpsi and opsi as a by-product */
-                n = residuals<T>(kp__, ispin_step, N, num_bands, eval, eval_old, evec, hphi,
-                                 ophi, hpsi, opsi, res, h_diag, o_diag);
+                n = residuals<T>(kp__, nc_mag ? 2 : ispin_step, N, num_bands, eval, eval_old, evec, hphi,
+                                 sphi, hpsi, spsi, res, h_diag, o_diag);
             }
 
             /* check if we run out of variational space or eigen-vectors are converged or it's a last iteration */
@@ -268,11 +301,8 @@ inline int Band::diag_pseudo_potential_davidson(K_point*       kp__,
                 /* recompute wave-functions */
                 /* \Psi_{i} = \sum_{mu} \phi_{mu} * Z_{mu, i} */
                 if (ctx_.settings().always_update_wf_ || k + n > 0) {
-                    if (nc_mag) {
-                        transform<T>(ctx_.processing_unit(), 1.0, {&phi}, 0, N, evec, 0, 0, 0.0, {&psi}, 0, num_bands);
-                    } else {
-                        transform<T>(ctx_.processing_unit(), phi.component(0), 0, N, evec, 0, 0, psi.component(ispin_step), 0, num_bands);
-                    }
+                    /* in case of non-collinear magnetism transform two components */ 
+                    transform<T>(ctx_.processing_unit(), nc_mag ? 2 : ispin_step, {&phi}, 0, N, evec, 0, 0, {&psi}, 0, num_bands);
                     /* update eigen-values */
                     for (int j = 0; j < num_bands; j++) {
                         kp__->band_energy(j + ispin_step * ctx_.num_fv_states()) = eval[j];
@@ -303,14 +333,14 @@ inline int Band::diag_pseudo_potential_davidson(K_point*       kp__,
 
                     /* need to compute all hpsi and opsi states (not only unconverged) */
                     if (converge_by_energy) {
-                        transform<T>(ctx_.processing_unit(), 1.0, std::vector<Wave_functions*>({&hphi, &ophi}), 0, N, evec, 0, 0, 0.0, {&hpsi, &opsi}, 0, num_bands);
+                        transform<T>(ctx_.processing_unit(), nc_mag ? 2 : ispin_step, 1.0, std::vector<Wave_functions*>({&hphi, &sphi}), 0, N, evec, 0, 0, 0.0, {&hpsi, &spsi}, 0, num_bands);
                     }
 
                     /* update basis functions, hphi and ophi */
                     for (int ispn = 0; ispn < num_sc; ispn++) {
-                        phi.component(ispn).copy_from(psi.component(ctx_.num_mag_dims() == 3 ? ispn : ispin_step), 0, num_bands, ctx_.processing_unit());
-                        hphi.component(ispn).copy_from(hpsi.component(ispn), 0, num_bands, ctx_.processing_unit());
-                        ophi.component(ispn).copy_from(opsi.component(ispn), 0, num_bands, ctx_.processing_unit());
+                        phi.copy_from(ctx_.processing_unit(), num_bands, psi, nc_mag ? ispn : ispin_step, 0, nc_mag ? ispn : 0, 0);
+                        hphi.copy_from(ctx_.processing_unit(), num_bands, hpsi, ispn, 0, ispn, 0);
+                        sphi.copy_from(ctx_.processing_unit(), num_bands, spsi, ispn, 0, ispn, 0);
                     }
                     /* number of basis functions that we already have */
                     N = num_bands;
@@ -318,29 +348,21 @@ inline int Band::diag_pseudo_potential_davidson(K_point*       kp__,
             }
 
             /* expand variational subspace with new basis vectors obtatined from residuals */
-            phi.copy_from(res, 0, n, N, ctx_.processing_unit());
+            for (int ispn = 0; ispn < num_sc; ispn++) {
+                phi.copy_from(ctx_.processing_unit(), n, res, ispn, 0, ispn, N);
+            }
 
-            /* apply Hamiltonian and overlap operators to the new basis functions */
-            apply_h_o<T>(kp__, ispin_step, N, n, phi, hphi, ophi, d_op__, q_op__);
+            /* apply Hamiltonian and S operators to the new basis functions */
+            H__.apply_h_s<T>(kp__, nc_mag ? 2 : ispin_step, N, n, phi, hphi, sphi, d_op__, q_op__);
 
             if (itso.orthogonalize_) {
-                orthogonalize<T>(ctx_.processing_unit(), num_sc, N, n, phi, hphi, ophi, ovlp, res.component(0));
+                orthogonalize<T>(ctx_.processing_unit(), nc_mag ? 2 : 0, phi, hphi, sphi, N, n, ovlp, res);
             }
 
             /* setup eigen-value problem
              * N is the number of previous basis functions
              * n is the number of new basis functions */
             set_subspace_mtrx(N, n, phi, hphi, hmlt, hmlt_old);
-
-            //== static int counter{0};
-            //== std::stringstream s;
-            //== if (ctx_.processing_unit() == CPU) {
-            //==     s<<"hmlt_cpu"<<counter;
-            //== } else {
-            //==     s<<"hmlt_gpu"<<counter;
-            //== }
-            //== hmlt.serialize(s.str(), N + n);
-            //== counter++;
 
             if (ctx_.control().verification_ >= 1) {
                 double max_diff = check_hermitian(hmlt, N + n);
@@ -353,7 +375,7 @@ inline int Band::diag_pseudo_potential_davidson(K_point*       kp__,
 
             if (!itso.orthogonalize_) {
                 /* setup overlap matrix */
-                set_subspace_mtrx(N, n, phi, ophi, ovlp, ovlp_old);
+                set_subspace_mtrx(N, n, phi, sphi, ovlp, ovlp_old);
 
                 if (ctx_.control().verification_ >= 1) {
                     double max_diff = check_hermitian(ovlp, N + n);
@@ -424,9 +446,9 @@ inline int Band::diag_pseudo_potential_davidson(K_point*       kp__,
     #ifdef __GPU
     if (ctx_.processing_unit() == GPU) {
         for (int ispn = 0; ispn < ctx_.num_spins(); ispn++) {
-            psi.component(ispn).pw_coeffs().copy_to_host(0, num_bands);
+            psi.pw_coeffs(ispn).copy_to_host(0, num_bands);
             if (!keep_wf_on_gpu) {
-                psi.component(ispn).pw_coeffs().deallocate_on_device();
+                psi.pw_coeffs(ispn).deallocate_on_device();
             }
         }
     }
@@ -438,6 +460,7 @@ inline int Band::diag_pseudo_potential_davidson(K_point*       kp__,
 template <typename T>
 inline void Band::diag_pseudo_potential_chebyshev(K_point* kp__,
                                                   int ispn__,
+                                                  Hamiltonian &H__,
                                                   D_operator<T>& d_op__,
                                                   Q_operator<T>& q_op__,
                                                   P_operator<T>& p_op__) const
@@ -445,16 +468,16 @@ inline void Band::diag_pseudo_potential_chebyshev(K_point* kp__,
     PROFILE("sirius::Band::diag_pseudo_potential_chebyshev");
 
 //==     auto pu = ctx_.processing_unit();
-//== 
+//==
 //==     /* short notation for number of target wave-functions */
 //==     int num_bands = ctx_.num_fv_states();
-//== 
+//==
 //==     auto& itso = ctx_.iterative_solver_input_section();
-//== 
+//==
 //==     /* short notation for target wave-functions */
 //==     auto& psi = kp__->spinor_wave_functions<false>(ispn__);
-//== 
-//== //== 
+//==
+//== //==
 //== //==     //auto& beta_pw_panel = kp__->beta_pw_panel();
 //== //==     //dmatrix<double_complex> S(unit_cell_.mt_basis_size(), unit_cell_.mt_basis_size(), kp__->blacs_grid());
 //== //==     //linalg<CPU>::gemm(2, 0, unit_cell_.mt_basis_size(), unit_cell_.mt_basis_size(), kp__->num_gkvec(), complex_one,
@@ -473,24 +496,24 @@ inline void Band::diag_pseudo_potential_chebyshev(K_point* kp__,
 //== //==     //    }
 //== //==     //}
 //== //==     //linalg<CPU>::geinv(unit_cell_.mt_basis_size(), S);
-//== //== 
-//== //== 
+//== //==
+//== //==
 //==     /* maximum order of Chebyshev polynomial*/
 //==     int order = itso.num_steps_ + 2;
-//== 
+//==
 //==     std::vector< Wave_functions<false>* > phi(order);
 //==     for (int i = 0; i < order; i++) {
 //==         phi[i] = new Wave_functions<false>(kp__->num_gkvec_loc(), num_bands, pu);
 //==     }
-//== 
+//==
 //==     Wave_functions<false> hphi(kp__->num_gkvec_loc(), num_bands, pu);
-//== 
+//==
 //==     /* trial basis functions */
 //==     phi[0]->copy_from(psi, 0, num_bands);
-//== 
+//==
 //==     /* apply Hamiltonian to the basis functions */
 //==     apply_h<T>(kp__, ispn__, 0, num_bands, *phi[0], hphi, h_op__, d_op__);
-//== 
+//==
 //==     /* compute Rayleight quotients */
 //==     std::vector<double> e0(num_bands, 0.0);
 //==     if (pu == CPU) {
@@ -502,14 +525,14 @@ inline void Band::diag_pseudo_potential_chebyshev(K_point* kp__,
 //==         }
 //==     }
 //==     kp__->comm().allreduce(e0);
-//== 
+//==
 //==     //== if (parameters_.processing_unit() == GPU)
 //==     //== {
 //==     //==     #ifdef __GPU
 //==     //==     mdarray<double, 1> e0_loc(kp__->spl_fv_states().local_size());
 //==     //==     e0_loc.allocate_on_device();
 //==     //==     e0_loc.zero_on_device();
-//== 
+//==
 //==     //==     compute_inner_product_gpu(kp__->num_gkvec_row(),
 //==     //==                               (int)kp__->spl_fv_states().local_size(),
 //==     //==                               phi[0].at<GPU>(),
@@ -523,8 +546,8 @@ inline void Band::diag_pseudo_potential_chebyshev(K_point* kp__,
 //==     //==     }
 //==     //==     #endif
 //==     //== }
-//==     //== 
-//== 
+//==     //==
+//==
 //==     /* estimate low and upper bounds of the Chebyshev filter */
 //==     double lambda0 = -1e10;
 //==     //double emin = 1e100;
@@ -534,23 +557,23 @@ inline void Band::diag_pseudo_potential_chebyshev(K_point* kp__,
 //==         //emin = std::min(emin, e0[i]);
 //==     }
 //==     double lambda1 = 0.5 * std::pow(ctx_.gk_cutoff(), 2);
-//== 
+//==
 //==     double r = (lambda1 - lambda0) / 2.0;
 //==     double c = (lambda1 + lambda0) / 2.0;
-//== 
+//==
 //==     auto apply_p = [kp__, &p_op__, num_bands](Wave_functions<false>& phi, Wave_functions<false>& op_phi) {
 //==         op_phi.copy_from(phi, 0, num_bands);
 //==         //for (int i = 0; i < kp__->beta_projectors().num_beta_chunks(); i++) {
 //==         //    kp__->beta_projectors().generate(i);
-//== 
+//==
 //==         //    kp__->beta_projectors().inner<T>(i, phi, 0, num_bands);
-//== 
+//==
 //==         //    p_op__.apply(i, 0, op_phi, 0, num_bands);
 //==         //}
 //==     };
-//== 
+//==
 //==     apply_p(hphi, *phi[1]);
-//==     
+//==
 //==     /* compute \psi_1 = (S^{-1}H\psi_0 - c\psi_0) / r */
 //==     if (pu == CPU) {
 //==         #pragma omp parallel for schedule(static)
@@ -568,15 +591,15 @@ inline void Band::diag_pseudo_potential_chebyshev(K_point* kp__,
 //== //==     //    phi[1].panel().copy_to_host();
 //== //==     //    #endif
 //== //==     //}
-//== //== 
-//== 
+//== //==
+//==
 //==     /* compute higher polynomial orders */
 //==     for (int k = 2; k < order; k++) {
-//== 
+//==
 //==         apply_h<T>(kp__, ispn__, 0, num_bands, *phi[k - 1], hphi, h_op__, d_op__);
-//== 
+//==
 //==         apply_p(hphi, *phi[k]);
-//== 
+//==
 //==         if (pu == CPU) {
 //==             #pragma omp parallel for schedule(static)
 //==             for (int i = 0; i < num_bands; i++) {
@@ -594,16 +617,16 @@ inline void Band::diag_pseudo_potential_chebyshev(K_point* kp__,
 //==         //==     #endif
 //==         //== }
 //==     }
-//== 
+//==
 //==     /* allocate Hamiltonian and overlap */
 //==     matrix<T> hmlt(num_bands, num_bands);
 //==     matrix<T> ovlp(num_bands, num_bands);
 //==     matrix<T> evec(num_bands, num_bands);
 //==     matrix<T> hmlt_old;
 //==     matrix<T> ovlp_old;
-//== 
+//==
 //==     int bs = ctx_.cyclic_block_size();
-//== 
+//==
 //==     dmatrix<T> hmlt_dist;
 //==     dmatrix<T> ovlp_dist;
 //==     dmatrix<T> evec_dist;
@@ -616,83 +639,84 @@ inline void Band::diag_pseudo_potential_chebyshev(K_point* kp__,
 //==         ovlp_dist = dmatrix<T>(num_bands, num_bands, ctx_.blacs_grid(), bs, bs);
 //==         evec_dist = dmatrix<T>(num_bands, num_bands, ctx_.blacs_grid(), bs, bs);
 //==     }
-//== 
+//==
 //==     std::vector<double> eval(num_bands);
-//== 
+//==
 //==     /* apply Hamiltonian and overlap operators to the new basis functions */
 //==     apply_h_o<T>(kp__, ispn__, 0, num_bands, *phi[order - 1], hphi, *phi[0], h_op__, d_op__, q_op__);
-//==     
+//==
 //==     //orthogonalize<T>(kp__, N, n, phi, hphi, ophi, ovlp);
-//== 
+//==
 //==     /* setup eigen-value problem */
 //==     set_h_o<T>(kp__, 0, num_bands, *phi[order - 1], hphi, *phi[0], hmlt, ovlp, hmlt_old, ovlp_old);
-//== 
+//==
 //==     /* solve generalized eigen-value problem with the size N */
 //==     diag_h_o<T>(kp__, num_bands, num_bands, hmlt, ovlp, evec, hmlt_dist, ovlp_dist, evec_dist, eval);
-//== 
+//==
 //==     /* recompute wave-functions */
 //==     /* \Psi_{i} = \sum_{mu} \phi_{mu} * Z_{mu, i} */
 //==     psi.transform_from<T>(*phi[order - 1], num_bands, evec, num_bands);
-//== 
+//==
 //==     for (int j = 0; j < ctx_.num_fv_states(); j++) {
 //==         kp__->band_energy(j + ispn__ * ctx_.num_fv_states()) = eval[j];
 //==     }
-//== 
+//==
 //==     for (int i = 0; i < order; i++) {
 //==         delete phi[i];
 //==     }
 }
 
-template <typename T>
-inline T 
-inner_local(K_point* kp__,
-            wave_functions& a,
-            int ia,
-            wave_functions& b,
-            int ib);
-
-template<>
-inline double 
-inner_local<double>(K_point* kp__,
-                    wave_functions& a,
-                    int ia,
-                    wave_functions& b,
-                    int ib)
-{
-    double result{0};
-    double* a_tmp = reinterpret_cast<double*>(&a.pw_coeffs().prime(0, ia));
-    double* b_tmp = reinterpret_cast<double*>(&b.pw_coeffs().prime(0, ib));
-    for (int igk = 0; igk < 2 * kp__->num_gkvec_loc(); igk++) {
-        result += a_tmp[igk] * b_tmp[igk];
-    }
-
-    if (kp__->comm().rank() == 0) {
-        result = 2 * result - a_tmp[0] * b_tmp[0];
-    } else {
-        result *= 2;
-    }
-
-    return result;
-}
-
-template<>
-inline double_complex 
-inner_local<double_complex>(K_point* kp__,
-                            wave_functions& a,
-                            int ia,
-                            wave_functions& b,
-                            int ib)
-{
-    double_complex result{0, 0};
-    for (int igk = 0; igk < kp__->num_gkvec_loc(); igk++) {
-        result += std::conj(a.pw_coeffs().prime(igk, ia)) * b.pw_coeffs().prime(igk, ib);
-    }
-    return result;
-}
+//template <typename T>
+//inline T 
+//inner_local(K_point* kp__,
+//            wave_functions& a,
+//            int ia,
+//            wave_functions& b,
+//            int ib);
+//
+//template<>
+//inline double 
+//inner_local<double>(K_point* kp__,
+//                    wave_functions& a,
+//                    int ia,
+//                    wave_functions& b,
+//                    int ib)
+//{
+//    double result{0};
+//    double* a_tmp = reinterpret_cast<double*>(&a.pw_coeffs().prime(0, ia));
+//    double* b_tmp = reinterpret_cast<double*>(&b.pw_coeffs().prime(0, ib));
+//    for (int igk = 0; igk < 2 * kp__->num_gkvec_loc(); igk++) {
+//        result += a_tmp[igk] * b_tmp[igk];
+//    }
+//
+//    if (kp__->comm().rank() == 0) {
+//        result = 2 * result - a_tmp[0] * b_tmp[0];
+//    } else {
+//        result *= 2;
+//    }
+//
+//    return result;
+//}
+//
+//template<>
+//inline double_complex 
+//inner_local<double_complex>(K_point* kp__,
+//                            wave_functions& a,
+//                            int ia,
+//                            wave_functions& b,
+//                            int ib)
+//{
+//    double_complex result{0, 0};
+//    for (int igk = 0; igk < kp__->num_gkvec_loc(); igk++) {
+//        result += std::conj(a.pw_coeffs().prime(igk, ia)) * b.pw_coeffs().prime(igk, ib);
+//    }
+//    return result;
+//}
 
 template <typename T>
 inline void Band::diag_pseudo_potential_rmm_diis(K_point* kp__,
                                                  int ispn__,
+                                                 Hamiltonian &H__,
                                                  D_operator<T>& d_op__,
                                                  Q_operator<T>& q_op__) const
 
@@ -701,7 +725,7 @@ inline void Band::diag_pseudo_potential_rmm_diis(K_point* kp__,
     double tol = ctx_.iterative_solver_tolerance();
 
     if (tol > 1e-4) {
-        diag_pseudo_potential_davidson(kp__, d_op__, q_op__);
+        diag_pseudo_potential_davidson(kp__, H__, d_op__, q_op__);
         return;
     }
 
@@ -764,7 +788,7 @@ inline void Band::diag_pseudo_potential_rmm_diis(K_point* kp__,
 //    std::vector<double> res_norm(num_bands);
 //    std::vector<double> res_norm_start(num_bands);
 //    std::vector<double> lambda(num_bands, 0);
-//    
+//
 //    auto update_res = [kp__, num_bands, &phi, &res, &hphi, &ophi, &last, &conv_band]
 //                      (std::vector<double>& res_norm__, std::vector<double>& eval__) -> void
 //    {
@@ -780,7 +804,7 @@ inline void Band::diag_pseudo_potential_rmm_diis(K_point* kp__,
 //        }
 //        kp__->comm().allreduce(e_tmp);
 //        kp__->comm().allreduce(d_tmp);
-//        
+//
 //        res_norm__ = std::vector<double>(num_bands, 0);
 //        #pragma omp parallel for
 //        for (int i = 0; i < num_bands; i++) {
@@ -817,7 +841,7 @@ inline void Band::diag_pseudo_potential_rmm_diis(K_point* kp__,
 //        if (n == 0) {
 //            return 0;
 //        }
-//        
+//
 //        /* apply Hamiltonian and overlap operators to the initial basis functions */
 //        this->apply_h_o<T>(kp__, ispn__, 0, n, phi_tmp, hphi_tmp, ophi_tmp, d_op__, q_op__);
 //
@@ -864,7 +888,7 @@ inline void Band::diag_pseudo_potential_rmm_diis(K_point* kp__,
 //    //        //== for (int igk = 0; igk < kp__->num_gkvec(); igk++)
 //    //        //== {
 //    //        //==     double x = std::pow(kp__->gkvec_cart(igk).length(), 2) / 3 / Ekin;
-//    //        //==     kres__(igk, i) = alpha * kres__(igk, i) + lambda[i] * res__(igk, i) * 
+//    //        //==     kres__(igk, i) = alpha * kres__(igk, i) + lambda[i] * res__(igk, i) *
 //    //        //==         (4.0 / 3 / Ekin) * (27 + 18 * x + 12 * x * x + 8 * x * x * x) / (27 + 18 * x + 12 * x * x + 8 * x * x * x + 16 * x * x * x * x);
 //    //        //== }
 //    //    }
@@ -872,7 +896,7 @@ inline void Band::diag_pseudo_potential_rmm_diis(K_point* kp__,
 //
 //    /* apply Hamiltonian and overlap operators to the initial basis functions */
 //    this->apply_h_o<T>(kp__, ispn__, 0, num_bands, *phi[0], *hphi[0], *ophi[0], d_op__, q_op__);
-//    
+//
 //    /* compute initial residuals */
 //    update_res(res_norm_start, eval);
 //
@@ -888,12 +912,12 @@ inline void Band::diag_pseudo_potential_rmm_diis(K_point* kp__,
 //    }
 //
 //    last = std::vector<int>(num_bands, 1);
-//    
+//
 //    phi[1]->pw_coeffs().prime().zero();
 //    /* apply preconditioner to the initial residuals */
 //    //apply_preconditioner(std::vector<double>(num_bands, 1), *res[0], 0.0, *phi[1]);
 //    STOP();
-//    
+//
 //    /* apply H and O to the preconditioned residuals */
 //    apply_h_o();
 //
@@ -931,7 +955,7 @@ inline void Band::diag_pseudo_potential_rmm_diis(K_point* kp__,
 //            if (std::abs(lambda[i]) < 0.5) {
 //                lambda[i] = 0.5 * Utils::sign(lambda[i]);
 //            }
-//            
+//
 //            /* construct new basis functions */
 //            for (int igk = 0; igk < kp__->num_gkvec_loc(); igk++) {
 //                 (*phi[1]).pw_coeffs().prime(igk, i) =  (*phi[0]).pw_coeffs().prime(igk, i) + lambda[i] *  (*phi[1]).pw_coeffs().prime(igk, i);
@@ -953,7 +977,7 @@ inline void Band::diag_pseudo_potential_rmm_diis(K_point* kp__,
 //    mdarray<T, 3> B(niter, niter, num_bands);
 //    mdarray<T, 2> V(niter, num_bands);
 //    std::vector<double> ev(niter);
-//    
+//
 //    /* start adjusting residuals */
 //    for (int iter = 2; iter < niter; iter++) {
 //        sddk::timer t1("sirius::Band::diag_pseudo_potential_rmm_diis|AB");
@@ -995,7 +1019,7 @@ inline void Band::diag_pseudo_potential_rmm_diis(K_point* kp__,
 //            }
 //        }
 //        t2.stop();
-//        
+//
 //        //apply_preconditioner(lambda, *res[iter], 1.0, *phi[iter]);
 //        STOP();
 //
@@ -1004,7 +1028,7 @@ inline void Band::diag_pseudo_potential_rmm_diis(K_point* kp__,
 //        eval_old = eval;
 //
 //        update_res(res_norm, eval);
-//        
+//
 //        for (int i = 0; i < num_bands; i++) {
 //            if (!conv_band[i]) {
 //                if (res_norm[i] < itso.residual_tolerance_) {
@@ -1068,4 +1092,3 @@ inline void Band::diag_pseudo_potential_rmm_diis(K_point* kp__,
 //        delete ophi[i];
 //    }
 }
-
