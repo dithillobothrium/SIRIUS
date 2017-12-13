@@ -37,6 +37,8 @@ extern "C" void create_beta_gk_gpu(int                   num_atoms,
                                    double_complex*       beta_gk);
 #endif
 
+// TODO: allocation strategy for beta and beta projectors is not good enough; shold be a better way
+
 /// Base class for beta-projectors, gradient of beta-projectors and strain derivatives of beta-projectors.
 template <int N>
 class Beta_projectors_base
@@ -78,6 +80,8 @@ class Beta_projectors_base
     }
 
   public:
+    static const int num_ = N;
+
     Beta_projectors_base(Simulation_context& ctx__,
                          Gvec         const& gkvec__)
         : ctx_(ctx__)
@@ -159,13 +163,14 @@ class Beta_projectors_base
     /** The following is computed: <beta|phi> */
     template <typename T>
     inline matrix<T> inner(int             chunk__,
-                           wave_functions& phi__,
+                           Wave_functions& phi__,
+                           int             ispn__,
                            int             idx0__,
                            int             n__)
     {
         PROFILE("sirius::Beta_projectors_base::inner");
 
-        assert(num_gkvec_loc_ == phi__.pw_coeffs().num_rows_loc());
+        assert(num_gkvec_loc_ == phi__.pw_coeffs(ispn__).num_rows_loc());
         
         auto& bp_chunks = ctx_.beta_projector_chunks();
 
@@ -196,7 +201,7 @@ class Beta_projectors_base
                     /* compute <beta|phi> */
                     linalg<CPU>::gemm(2, 0, nbeta, n__, num_gkvec_loc_,
                                       pw_coeffs_a().template at<CPU>(), num_gkvec_loc_,
-                                      phi__.pw_coeffs().prime().at<CPU>(0, idx0__), phi__.pw_coeffs().prime().ld(),
+                                      phi__.pw_coeffs(ispn__).prime().at<CPU>(0, idx0__), phi__.pw_coeffs(ispn__).prime().ld(),
                                       reinterpret_cast<double_complex*>(beta_phi.template at<CPU>()), nbeta);
                     break;
                 }
@@ -204,7 +209,7 @@ class Beta_projectors_base
                     #ifdef __GPU
                     linalg<GPU>::gemm(2, 0, nbeta, n__, num_gkvec_loc_,
                                       pw_coeffs_a().template at<GPU>(), num_gkvec_loc_,
-                                      phi__.pw_coeffs().prime().at<GPU>(0, idx0__), phi__.pw_coeffs().prime().ld(),
+                                      phi__.pw_coeffs(ispn__).prime().at<GPU>(0, idx0__), phi__.pw_coeffs(ispn__).prime().ld(),
                                       reinterpret_cast<double_complex*>(beta_phi.template at<GPU>()), nbeta);
                     beta_phi.template copy<memory_t::device, memory_t::host>();
                     #else
@@ -225,7 +230,8 @@ class Beta_projectors_base
                     linalg<CPU>::gemm(2, 0, nbeta, n__, 2 * num_gkvec_loc_,
                                       a,
                                       reinterpret_cast<double*>(pw_coeffs_a().template at<CPU>()), 2 * num_gkvec_loc_,
-                                      reinterpret_cast<double*>(phi__.pw_coeffs().prime().at<CPU>(0, idx0__)), 2 * phi__.pw_coeffs().prime().ld(),
+                                      reinterpret_cast<double*>(phi__.pw_coeffs(ispn__).prime().at<CPU>(0, idx0__)),
+                                      2 * phi__.pw_coeffs(ispn__).prime().ld(),
                                       b,
                                       reinterpret_cast<double*>(beta_phi.template at<CPU>()), nbeta);
 
@@ -233,7 +239,8 @@ class Beta_projectors_base
                         /* subtract one extra G=0 contribution */
                         linalg<CPU>::ger(nbeta, n__, a1,
                                          reinterpret_cast<double*>(pw_coeffs_a().template at<CPU>()), 2 * num_gkvec_loc_,
-                                         reinterpret_cast<double*>(phi__.pw_coeffs().prime().at<CPU>(0, idx0__)), 2 * phi__.pw_coeffs().prime().ld(),
+                                         reinterpret_cast<double*>(phi__.pw_coeffs(ispn__).prime().at<CPU>(0, idx0__)), 
+                                         2 * phi__.pw_coeffs(ispn__).prime().ld(),
                                          reinterpret_cast<double*>(beta_phi.template at<CPU>()), nbeta);
                     }
                     break;
@@ -243,7 +250,8 @@ class Beta_projectors_base
                     linalg<GPU>::gemm(2, 0, nbeta, n__, 2 * num_gkvec_loc_,
                                       &a,
                                       reinterpret_cast<double*>(pw_coeffs_a().template at<GPU>()), 2 * num_gkvec_loc_,
-                                      reinterpret_cast<double*>(phi__.pw_coeffs().prime().at<GPU>(0, idx0__)), 2 * phi__.pw_coeffs().prime().ld(),
+                                      reinterpret_cast<double*>(phi__.pw_coeffs(ispn__).prime().at<GPU>(0, idx0__)),
+                                      2 * phi__.pw_coeffs(ispn__).prime().ld(),
                                       &b,
                                       reinterpret_cast<double*>(beta_phi.template at<GPU>()), nbeta);
 
@@ -251,7 +259,8 @@ class Beta_projectors_base
                         /* subtract one extra G=0 contribution */
                         linalg<GPU>::ger(nbeta, n__, &a1, 
                                          reinterpret_cast<double*>(pw_coeffs_a().template at<GPU>()), 2 * num_gkvec_loc_,
-                                         reinterpret_cast<double*>(phi__.pw_coeffs().prime().at<GPU>(0, idx0__)), 2 * phi__.pw_coeffs().prime().ld(),
+                                         reinterpret_cast<double*>(phi__.pw_coeffs(ispn__).prime().at<GPU>(0, idx0__)),
+                                         2 * phi__.pw_coeffs(ispn__).prime().ld(),
                                          reinterpret_cast<double*>(beta_phi.template at<GPU>()), nbeta);
                     }
                     beta_phi.template copy<memory_t::device, memory_t::host>();

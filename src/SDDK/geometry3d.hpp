@@ -223,6 +223,11 @@ class matrix3d
         }
     }
 
+    void zero()
+    {
+        std::memset(&mtrx_[0][0], 0, 9 * sizeof(T));
+    }
+
     /// Assigment operator.
     matrix3d<T>& operator=(const matrix3d<T>& rhs)
     {
@@ -255,6 +260,17 @@ class matrix3d
             }
         }
         return c;
+    }
+
+    /// Add another matrix to the current one
+    inline matrix3d<T>& operator+=(matrix3d<T> const& b)
+    {
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                (*this)(i, j) += b(i, j);
+            }
+        }
+        return (*this);
     }
 
     /// Matrix-vector multiplication.
