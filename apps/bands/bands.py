@@ -8,9 +8,6 @@ import copy
 
 plt.figure(1, figsize=(8, 12))
 
-emin = -0.5
-emax = 1
-
 with open(sys.argv[1], "r") as fin:
     jin = json.load(fin)
 
@@ -45,7 +42,7 @@ plt.ylabel("Energy (Ha)")
 plt.grid(which = "major", axis = "both")
 # setup x and y limits
 ax = plt.axis()
-plt.axis([0, x_axis[-1], emin, emax])
+plt.axis([0, x_axis[-1], -0.5, 1])
 
 # second way to setup limits
 #matplotlib.pyplot.xlim(0, jin["xaxis"][-1]) 

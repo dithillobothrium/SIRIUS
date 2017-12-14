@@ -30,7 +30,7 @@
 #include "version.h"
 #include "simulation_parameters.h"
 #include "mpi_grid.hpp"
-#include "Radial_integrals/radial_integrals.h"
+#include "radial_integrals.h"
 
 #ifdef __GPU
 extern "C" void generate_phase_factors_gpu(int num_gvec_loc__,
@@ -49,12 +49,6 @@ class Simulation_context_base: public Simulation_parameters
 
         /// Communicator for this simulation.
         Communicator const& comm_;
-
-        /// Auxiliary communicator for the fine-grid FFT transformation.
-        Communicator comm_ortho_fft_;
-
-        /// Auxiliary communicator for the coarse-grid FFT transformation.
-        Communicator comm_ortho_fft_coarse_;
         
         /// Unit cell of the simulation.
         Unit_cell unit_cell_;
@@ -106,9 +100,7 @@ class Simulation_context_base: public Simulation_parameters
 
         std::unique_ptr<Radial_integrals_aug<false>> aug_ri_;
 
-        std::unique_ptr<Radial_integrals_atomic_wf> atomic_wf_ri_;
-
-        std::vector<std::vector<std::pair<int, double>>> atoms_to_grid_idx_;
+        std::vector<std::vector<std::pair<int,double>>> atoms_to_grid_idx_;
 
         // TODO remove to somewhere
         const double av_atom_radius_{2.0};
@@ -117,32 +109,7 @@ class Simulation_context_base: public Simulation_parameters
         
         bool initialized_{false};
 
-        inline void init_fft()
-        {
-            auto rlv = unit_cell_.reciprocal_lattice_vectors();
-
-            if (!(control().fft_mode_ == "serial" || control().fft_mode_ == "parallel")) {
-                TERMINATE("wrong FFT mode");
-            }
-
-            /* create FFT driver for dense mesh (density and potential) */
-            fft_ = std::unique_ptr<FFT3D>(new FFT3D(find_translations(pw_cutoff(), rlv), comm_fft(), processing_unit())); 
-
-            /* create a list of G-vectors for dense FFT grid; G-vectors are divided between all available MPI ranks.*/
-            gvec_ = Gvec(rlv, pw_cutoff(), comm(), comm_fft(), comm_ortho_fft(), control().reduce_gvec_);
-
-            remap_gvec_ = std::unique_ptr<remap_gvec_to_shells>(new remap_gvec_to_shells(comm(), gvec()));
-
-            /* prepare fine-grained FFT driver for the entire simulation */
-            fft_->prepare(gvec_.partition());
-
-            /* create FFT driver for coarse mesh */
-            auto fft_coarse_grid = FFT3D_grid(find_translations(2 * gk_cutoff(), rlv));
-            fft_coarse_ = std::unique_ptr<FFT3D>(new FFT3D(fft_coarse_grid, comm_fft_coarse(), processing_unit()));
-
-            /* create a list of G-vectors for corase FFT grid */
-            gvec_coarse_ = Gvec(rlv, gk_cutoff() * 2, comm(), comm_fft_coarse(), comm_ortho_fft_coarse(), control().reduce_gvec_);
-        }
+        void init_fft();
 
         /* copy constructor is forbidden */
         Simulation_context_base(Simulation_context_base const&) = delete;
@@ -335,11 +302,6 @@ class Simulation_context_base: public Simulation_parameters
             return mpi_grid_->communicator(1 << 0);
         }
 
-        Communicator const& comm_ortho_fft() const
-        {
-            return comm_ortho_fft_;
-        }
-
         /// Communicator of the coarse FFT grid.
         Communicator const& comm_fft_coarse() const
         {
@@ -348,11 +310,6 @@ class Simulation_context_base: public Simulation_parameters
             } else {
                 return comm_fft();
             }
-        }
-
-        Communicator const& comm_ortho_fft_coarse() const
-        {
-            return comm_ortho_fft_coarse_;
         }
 
         void create_storage_file() const
@@ -526,11 +483,6 @@ class Simulation_context_base: public Simulation_parameters
         {
             return *aug_ri_;
         }
-
-        inline Radial_integrals_atomic_wf const& atomic_wf_ri() const
-        {
-            return *atomic_wf_ri_;
-        }
         
         /// Find the lambda parameter used in the Ewald summation.
         /** lambda parameter scales the erfc function argument:
@@ -565,6 +517,38 @@ class Simulation_context_base: public Simulation_parameters
             return sym_phase_factors_;
         }
 };
+
+inline void Simulation_context_base::init_fft()
+{
+    auto rlv = unit_cell_.reciprocal_lattice_vectors();
+
+    if (!(control().fft_mode_ == "serial" || control().fft_mode_ == "parallel")) {
+        TERMINATE("wrong FFT mode");
+    }
+
+    /* create FFT driver for dense mesh (density and potential) */
+    fft_ = std::unique_ptr<FFT3D>(new FFT3D(find_translations(pw_cutoff(), rlv), comm_fft(), processing_unit())); 
+
+    /* create a list of G-vectors for dense FFT grid; G-vectors are divided between all available MPI ranks.*/
+    gvec_ = Gvec(rlv, pw_cutoff(), comm(), comm_fft(), control().reduce_gvec_);
+
+    remap_gvec_ = std::unique_ptr<remap_gvec_to_shells>(new remap_gvec_to_shells(comm(), gvec()));
+
+    /* prepare fine-grained FFT driver for the entire simulation */
+    fft_->prepare(gvec_.partition());
+
+    /* create FFT driver for coarse mesh */
+    auto fft_coarse_grid = FFT3D_grid(find_translations(2 * gk_cutoff(), rlv));
+    //auto pu = (fft_coarse_grid.size() < std::pow(64, 3)) ? CPU : processing_unit(); 
+    //if (full_potential()) {
+    //    pu = processing_unit();
+    //}
+    auto pu = processing_unit();
+    fft_coarse_ = std::unique_ptr<FFT3D>(new FFT3D(fft_coarse_grid, comm_fft_coarse(), pu));
+
+    /* create a list of G-vectors for corase FFT grid */
+    gvec_coarse_ = Gvec(rlv, gk_cutoff() * 2, comm(), comm_fft_coarse(), control().reduce_gvec_);
+}
 
 inline void Simulation_context_base::initialize()
 {
@@ -621,11 +605,10 @@ inline void Simulation_context_base::initialize()
 
     /* setup MPI grid */
     mpi_grid_ = std::unique_ptr<MPI_grid>(new MPI_grid({npr, npc, npk}, comm_));
-
-    comm_ortho_fft_ = comm_.split(comm_fft().rank());
-
-    comm_ortho_fft_coarse_ = comm_.split(comm_fft_coarse().rank());
     
+    /* setup BLACS grid */
+    blacs_grid_ = std::unique_ptr<BLACS_grid>(new BLACS_grid(comm_band(), npr, npc));
+
     /* can't use reduced G-vectors in LAPW code */
     if (full_potential()) {
         control_input_.reduce_gvec_ = false;
@@ -714,6 +697,17 @@ inline void Simulation_context_base::initialize()
         TERMINATE(s);
     }
     
+    /* setup the cyclic block size */
+    if (cyclic_block_size() < 0) {
+        double a = std::min(std::log2(double(num_fv_states()) / blacs_grid_->num_ranks_col()),
+                            std::log2(double(num_fv_states()) / blacs_grid_->num_ranks_row()));
+        if (a < 1) {
+            control_input_.cyclic_block_size_ = 2;
+        } else {
+            control_input_.cyclic_block_size_ = static_cast<int>(std::min(128.0, std::pow(2.0, static_cast<int>(a))) + 1e-12);
+        }
+    }
+    
     std::string evsn[] = {std_evp_solver_name(), gen_evp_solver_name()};
 
     if (comm_band().size() == 1) {
@@ -772,32 +766,6 @@ inline void Simulation_context_base::initialize()
         *evst[i] = str_to_ev_solver_t[name];
     }
 
-    auto std_solver = std_evp_solver<double>();
-    auto gen_solver = gen_evp_solver<double>();
-
-    if (std_solver->is_parallel() != gen_solver->is_parallel()) {
-        TERMINATE("both solvers must be sequential or parallel");
-    }
-
-    /* setup BLACS grid */
-    if (std_solver->is_parallel()) {
-        blacs_grid_ = std::unique_ptr<BLACS_grid>(new BLACS_grid(comm_band(), npr, npc));
-    } else {
-        blacs_grid_ = std::unique_ptr<BLACS_grid>(new BLACS_grid(mpi_comm_self(), 1, 1));
-    }
-
-    /* setup the cyclic block size */
-    if (cyclic_block_size() < 0) {
-        double a = std::min(std::log2(double(num_fv_states()) / blacs_grid_->num_ranks_col()),
-                            std::log2(double(num_fv_states()) / blacs_grid_->num_ranks_row()));
-        if (a < 1) {
-            control_input_.cyclic_block_size_ = 2;
-        } else {
-            control_input_.cyclic_block_size_ = static_cast<int>(std::min(128.0, std::pow(2.0, static_cast<int>(a))) + 1e-12);
-        }
-    }
-    
-
     if (processing_unit() == GPU) {
         gvec_coord_ = mdarray<int, 2>(gvec_.count(), 3, memory_t::host | memory_t::device, "gvec_coord_");
         for (int igloc = 0; igloc < gvec_.count(); igloc++) {
@@ -831,8 +799,6 @@ inline void Simulation_context_base::initialize()
         beta_ri_djl_ = std::unique_ptr<Radial_integrals_beta<true>>(new Radial_integrals_beta<true>(unit_cell(), gk_cutoff() + 1, settings().nprii_beta_));
         
         aug_ri_ = std::unique_ptr<Radial_integrals_aug<false>>(new Radial_integrals_aug<false>(unit_cell(), pw_cutoff() + 1, settings().nprii_aug_));
-
-        atomic_wf_ri_ = std::unique_ptr<Radial_integrals_atomic_wf>(new Radial_integrals_atomic_wf(unit_cell(), gk_cutoff(), 20));
     }
 
     //time_active_ = -runtime::wtime();

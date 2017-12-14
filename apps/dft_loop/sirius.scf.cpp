@@ -28,7 +28,7 @@ std::unique_ptr<Simulation_context> create_sim_ctx(std::string     fname__,
 {
     auto ctx_ptr = std::unique_ptr<Simulation_context>(new Simulation_context(fname__, mpi_comm_world()));
     Simulation_context& ctx = *ctx_ptr;
-
+    
     auto& inp = ctx.parameters_input();
     if (inp.gamma_point_ && !(inp.ngridk_[0] * inp.ngridk_[1] * inp.ngridk_[2] == 1)) {
         TERMINATE("this is not a Gamma-point calculation")
@@ -65,14 +65,12 @@ double ground_state(Simulation_context& ctx,
     if (ctx.comm().rank() == 0 && ctx.control().print_memory_usage_) {
         MEMORY_USAGE_INFO();
     }
-
+    
     Potential potential(ctx);
     potential.allocate();
 
     Density density(ctx);
     density.allocate();
-
-    Hamiltonian H(ctx, potential);
 
     if (ctx.comm().rank() == 0 && ctx.control().print_memory_usage_) {
         MEMORY_USAGE_INFO();
@@ -90,8 +88,8 @@ double ground_state(Simulation_context& ctx,
     std::string ref_file = args.value<std::string>("test_against", "");
     /* don't write output if we compare against the reference calculation */
     bool write_state = (ref_file.size() == 0);
-
-    DFT_ground_state dft(ctx, H, density, ks);
+    
+    DFT_ground_state dft(ctx, potential, density, ks);
 
     if (task == task_t::ground_state_restart) {
         if (!Utils::file_exists(storage_file_name)) {
@@ -103,10 +101,10 @@ double ground_state(Simulation_context& ctx,
         density.initial_density();
         potential.generate(density);
         if (!ctx.full_potential()) {
-            dft.band().initialize_subspace(ks, H);
+            dft.band().initialize_subspace(ks, potential);
         }
     }
-
+    
     /* launch the calculation */
     int result = dft.find(inp.potential_tol_, inp.energy_tol_, inp.num_dft_iter_, write_state);
 
@@ -116,7 +114,7 @@ double ground_state(Simulation_context& ctx,
         auto dict = dft.serialize();
         json dict_ref;
         std::ifstream(ref_file) >> dict_ref;
-
+        
         double e1 = dict["energy"]["total"];
         double e2 = dict_ref["ground_state"]["energy"]["total"];
 
@@ -140,16 +138,17 @@ double ground_state(Simulation_context& ctx,
     if (write_state && write_output) {
         json dict;
         json_output_common(dict);
-
+        
         dict["task"] = static_cast<int>(task);
         dict["ground_state"] = dft.serialize();
         dict["timers"] = sddk::timer::serialize_timers();
+ 
         if (ctx.comm().rank() == 0) {
             std::ofstream ofs(std::string("output_") + ctx.start_time_tag() + std::string(".json"),
                               std::ofstream::out | std::ofstream::trunc);
             ofs << dict.dump(4);
         }
-
+        
         if (args.exist("aiida_output")) {
             json dict;
             json_output_common(dict);
@@ -210,8 +209,6 @@ void run_tasks(cmd_args const& args)
         Potential potential(*ctx);
         potential.allocate();
 
-        Hamiltonian H(*ctx, potential);
-
         Density density(*ctx);
         density.allocate();
 
@@ -236,7 +233,7 @@ void run_tasks(cmd_args const& args)
         x_axis.push_back(0);
         x_ticks.push_back({0, vertex[0].first});
         ks.add_kpoint(&vertex[0].second[0], 1.0);
-
+        
         double t{0};
         for (size_t i = 0; i < vertex.size() - 1; i++) {
             vector3d<double> v0 = vector3d<double>(vertex[i].second);
@@ -252,7 +249,7 @@ void run_tasks(cmd_args const& args)
             }
             x_ticks.push_back({t, vertex[i + 1].first});
         }
-
+        
         ks.initialize();
 
         //density.initial_density();
@@ -260,10 +257,9 @@ void run_tasks(cmd_args const& args)
         potential.generate(density);
         Band band(*ctx);
         if (!ctx->full_potential()) {
-            band.initialize_subspace(ks, H);
-            H.U().hubbard_compute_occupation_numbers(ks);
+            band.initialize_subspace(ks, potential);
         }
-        band.solve_for_kset(ks, H, true);
+        band.solve_for_kset(ks, potential, true);
 
         ks.sync_band_energies();
         if (mpi_comm_world().rank() == 0) {
@@ -321,7 +317,7 @@ int main(int argn, char** argv)
     sirius::initialize(1);
 
     run_tasks(args);
-
+    
     sirius::finalize(1);
     return 0;
 }
