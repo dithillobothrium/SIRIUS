@@ -30,7 +30,7 @@
 #include "version.h"
 #include "simulation_parameters.h"
 #include "mpi_grid.hpp"
-#include "Radial_integrals/radial_integrals.h"
+#include "radial_integrals.h"
 
 #ifdef __GPU
 extern "C" void generate_phase_factors_gpu(int num_gvec_loc__,
@@ -49,12 +49,6 @@ class Simulation_context_base: public Simulation_parameters
 
         /// Communicator for this simulation.
         Communicator const& comm_;
-
-        /// Auxiliary communicator for the fine-grid FFT transformation.
-        Communicator comm_ortho_fft_;
-
-        /// Auxiliary communicator for the coarse-grid FFT transformation.
-        Communicator comm_ortho_fft_coarse_;
         
         /// Unit cell of the simulation.
         Unit_cell unit_cell_;
@@ -106,9 +100,7 @@ class Simulation_context_base: public Simulation_parameters
 
         std::unique_ptr<Radial_integrals_aug<false>> aug_ri_;
 
-        std::unique_ptr<Radial_integrals_atomic_wf> atomic_wf_ri_;
-
-        std::vector<std::vector<std::pair<int, double>>> atoms_to_grid_idx_;
+        std::vector<std::vector<std::pair<int,double>>> atoms_to_grid_idx_;
 
         // TODO remove to somewhere
         const double av_atom_radius_{2.0};
@@ -129,7 +121,7 @@ class Simulation_context_base: public Simulation_parameters
             fft_ = std::unique_ptr<FFT3D>(new FFT3D(find_translations(pw_cutoff(), rlv), comm_fft(), processing_unit())); 
 
             /* create a list of G-vectors for dense FFT grid; G-vectors are divided between all available MPI ranks.*/
-            gvec_ = Gvec(rlv, pw_cutoff(), comm(), comm_fft(), comm_ortho_fft(), control().reduce_gvec_);
+            gvec_ = Gvec(rlv, pw_cutoff(), comm(), comm_fft(), control().reduce_gvec_);
 
             remap_gvec_ = std::unique_ptr<remap_gvec_to_shells>(new remap_gvec_to_shells(comm(), gvec()));
 
@@ -141,7 +133,7 @@ class Simulation_context_base: public Simulation_parameters
             fft_coarse_ = std::unique_ptr<FFT3D>(new FFT3D(fft_coarse_grid, comm_fft_coarse(), processing_unit()));
 
             /* create a list of G-vectors for corase FFT grid */
-            gvec_coarse_ = Gvec(rlv, gk_cutoff() * 2, comm(), comm_fft_coarse(), comm_ortho_fft_coarse(), control().reduce_gvec_);
+            gvec_coarse_ = Gvec(rlv, gk_cutoff() * 2, comm(), comm_fft_coarse(), control().reduce_gvec_);
         }
 
         /* copy constructor is forbidden */
@@ -335,11 +327,6 @@ class Simulation_context_base: public Simulation_parameters
             return mpi_grid_->communicator(1 << 0);
         }
 
-        Communicator const& comm_ortho_fft() const
-        {
-            return comm_ortho_fft_;
-        }
-
         /// Communicator of the coarse FFT grid.
         Communicator const& comm_fft_coarse() const
         {
@@ -348,11 +335,6 @@ class Simulation_context_base: public Simulation_parameters
             } else {
                 return comm_fft();
             }
-        }
-
-        Communicator const& comm_ortho_fft_coarse() const
-        {
-            return comm_ortho_fft_coarse_;
         }
 
         void create_storage_file() const
@@ -526,11 +508,6 @@ class Simulation_context_base: public Simulation_parameters
         {
             return *aug_ri_;
         }
-
-        inline Radial_integrals_atomic_wf const& atomic_wf_ri() const
-        {
-            return *atomic_wf_ri_;
-        }
         
         /// Find the lambda parameter used in the Ewald summation.
         /** lambda parameter scales the erfc function argument:
@@ -621,10 +598,6 @@ inline void Simulation_context_base::initialize()
 
     /* setup MPI grid */
     mpi_grid_ = std::unique_ptr<MPI_grid>(new MPI_grid({npr, npc, npk}, comm_));
-
-    comm_ortho_fft_ = comm_.split(comm_fft().rank());
-
-    comm_ortho_fft_coarse_ = comm_.split(comm_fft_coarse().rank());
     
     /* can't use reduced G-vectors in LAPW code */
     if (full_potential()) {
@@ -831,8 +804,6 @@ inline void Simulation_context_base::initialize()
         beta_ri_djl_ = std::unique_ptr<Radial_integrals_beta<true>>(new Radial_integrals_beta<true>(unit_cell(), gk_cutoff() + 1, settings().nprii_beta_));
         
         aug_ri_ = std::unique_ptr<Radial_integrals_aug<false>>(new Radial_integrals_aug<false>(unit_cell(), pw_cutoff() + 1, settings().nprii_aug_));
-
-        atomic_wf_ri_ = std::unique_ptr<Radial_integrals_atomic_wf>(new Radial_integrals_atomic_wf(unit_cell(), gk_cutoff(), 20));
     }
 
     //time_active_ = -runtime::wtime();
