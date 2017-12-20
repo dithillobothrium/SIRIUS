@@ -849,8 +849,8 @@ class Potential
             }
 
             if (!ctx_.full_potential()) {
-                generate_D_operator_matrix();
                 generate_PAW_effective_potential(density__);
+                generate_D_operator_matrix();
             }
         }
 

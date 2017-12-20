@@ -100,9 +100,6 @@ inline void Potential::generate_PAW_effective_potential(Density const& density)
         print_checksum("paw_dij", cs);
     }
 
-    // add paw Dij to uspp Dij
-    add_paw_Dij_to_atom_Dmtrx();
-
     // calc total energy
     double energies[] = {0.0, 0.0, 0.0, 0.0};
 
@@ -602,6 +599,7 @@ inline double Potential::calc_PAW_one_elec_energy(paw_potential_data_t& pdd,
 
     return energy.real();
 }
+
 
 inline void Potential::add_paw_Dij_to_atom_Dmtrx()
 {
