@@ -25,10 +25,10 @@
 #ifndef __INPUT_H__
 #define __INPUT_H__
 
-#include "geometry3d.hpp"
-#include "runtime.h"
 #include "constants.h"
-#include "utils.h"
+#include "sddk.hpp"
+
+using namespace geometry3d;
 
 namespace sirius {
 
@@ -328,6 +328,7 @@ struct Control_input
     bool print_stress_{false};
     bool print_forces_{false};
     bool print_timers_{true};
+    bool print_neighbors_{false};
 
     void read(json const& parser)
     {
@@ -351,6 +352,7 @@ struct Control_input
             print_stress_        = parser["control"].value("print_stress", print_stress_);
             print_forces_        = parser["control"].value("print_forces", print_forces_);
             print_timers_        = parser["control"].value("print_timers", print_timers_);
+            print_neighbors_     = parser["control"].value("print_neighbors", print_neighbors_);
 
             auto strings = {&std_evp_solver_name_, &gen_evp_solver_name_, &fft_mode_, &processing_unit_};
             for (auto s : strings) {
@@ -414,11 +416,8 @@ struct Parameters_input
     /// True if spin-orbit correction is applied.
     bool so_correction_{false};
 
-    /// True if hubbard correction is applied.
+    /// True if Hubbard (or U) correction is applied.
     bool hubbard_correction_{false};
-
-    /// True if UJ correction is applied.
-    bool uj_correction_{false};
 
     /// True if symmetry is used.
     bool use_symmetry_{true};
@@ -520,10 +519,11 @@ struct Hubbard_input
     std::string wave_function_file_;
     std::vector<std::pair<std::string, std::vector<double>>> species;
 
-    const bool hubbard_correction() const
+    bool hubbard_correction() const
     {
         return hubbard_correction_;
     }
+
     void read(json const& parser)
     {
         if (!parser.count("hubbard"))

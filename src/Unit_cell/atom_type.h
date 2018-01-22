@@ -35,6 +35,7 @@
 #include "xc_functional.h"
 #include "simulation_parameters.h"
 #include "sht.h"
+
 namespace sirius {
 
 /// A helper class to establish various index mappings for the atomic radial functions.
@@ -182,6 +183,14 @@ class radial_functions_index
     }
 };
 
+/// A helper class to establish various index mappings for the atomic basis functions.
+/** Atomic basis function is a radial function multiplied by a spherical harmonic:
+    \f[
+      \phi_{\ell m \nu}({\bf r}) = f_{\ell \nu}(r) Y_{\ell m}(\hat {\bf r})
+    \f]
+    Multiple radial functions for each \f$ \ell \f$ channel are allowed. This is reflected by
+    the \f$ \nu \f$ index and called "order".
+  */
 class basis_functions_index
 {
   private:
@@ -191,18 +200,13 @@ class basis_functions_index
 
     mdarray<int, 1> index_by_idxrf_;
 
-    /// number of augmented wave basis functions
-    int size_aw_;
+    /// Number of augmented wave basis functions.
+    int size_aw_{0};
 
-    /// number of local orbital basis functions
-    int size_lo_;
+    /// Number of local orbital basis functions.
+    int size_lo_{0};
 
   public:
-    basis_functions_index()
-        : size_aw_(0)
-        , size_lo_(0)
-    {
-    }
 
     void init(radial_functions_index& indexr)
     {
@@ -277,9 +281,12 @@ class basis_functions_index
     }
 };
 
+/// Defines the properties of atom type.
+/** Atoms wth the same properties are grouped by type. */
 class Atom_type
 {
   private:
+    /// Basic parameters.
     Simulation_parameters const& parameters_;
 
     /// Unique id of atom type in the range [0, \f$ N_{types} \f$).
@@ -294,7 +301,7 @@ class Atom_type
     /// Chemical element name.
     std::string name_;
 
-    /// Nucleus charge, treated as positive(!) integer.
+    /// Nucleus charge or pseudocharge, treated as positive(!) integer.
     int zn_{0};
 
     /// Atom mass.
@@ -841,6 +848,7 @@ class Atom_type
         return atom_id_[idx];
     }
 
+    /// Add global index of atom to this atom type.
     inline void add_atom_id(int atom_id__)
     {
         atom_id_.push_back(atom_id__);
@@ -1260,7 +1268,7 @@ class Atom_type
     }
 
 
-    inline const double get_occupancy_hubbard_orbital() const
+    inline double get_occupancy_hubbard_orbital() const
     {
         return hubbard_occupancy_orbital_;
     }
@@ -1530,11 +1538,10 @@ inline void Atom_type::init(int offset_lo__)
     if (parameters_.processing_unit() == GPU && parameters_.full_potential()) {
 #ifdef __GPU
         idx_radial_integrals_.allocate(memory_t::device);
-        idx_radial_integrals_.copy_to_device();
+        idx_radial_integrals_.copy<memory_t::host, memory_t::device>();
         rf_coef_ = mdarray<double, 3>(num_mt_points_, 4, indexr().size(), memory_t::host_pinned | memory_t::device);
-        vrf_coef_ =
-            mdarray<double, 3>(num_mt_points_, 4, lmmax_pot * indexr().size() * (parameters_.num_mag_dims() + 1),
-                               memory_t::host_pinned | memory_t::device);
+        vrf_coef_ = mdarray<double, 3>(num_mt_points_, 4, lmmax_pot * indexr().size() * (parameters_.num_mag_dims() + 1),
+                                       memory_t::host_pinned | memory_t::device);
 #else
         TERMINATE_NO_GPU
 #endif

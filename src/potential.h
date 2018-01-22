@@ -369,16 +369,16 @@ class Potential
             xc_energy_density_->allocate_mt(false);
 
             for (int ispn = 0; ispn < ctx_.num_spins(); ispn++) {
-                vsigma_[ispn] = std::unique_ptr<Smooth_periodic_function<double>>(new Smooth_periodic_function<double>(ctx_.fft(), ctx_.gvec()));
+                vsigma_[ispn] = std::unique_ptr<Smooth_periodic_function<double>>(new Smooth_periodic_function<double>(ctx_.fft(), ctx_.gvec_partition()));
             }
 
             if (!ctx_.full_potential()) {
-                local_potential_ = std::unique_ptr<Smooth_periodic_function<double>>(new Smooth_periodic_function<double>(ctx_.fft(), ctx_.gvec()));
+                local_potential_ = std::unique_ptr<Smooth_periodic_function<double>>(new Smooth_periodic_function<double>(ctx_.fft(), ctx_.gvec_partition()));
                 local_potential_->zero();
 
                 generate_local_potential();
 
-                dveff_ = std::unique_ptr<Smooth_periodic_function<double>>(new Smooth_periodic_function<double>(ctx_.fft(), ctx_.gvec()));
+                dveff_ = std::unique_ptr<Smooth_periodic_function<double>>(new Smooth_periodic_function<double>(ctx_.fft(), ctx_.gvec_partition()));
             }
 
             vh_el_ = mdarray<double, 1>(unit_cell_.num_atoms());
@@ -862,6 +862,12 @@ class Potential
                 s << "effective_magnetic_field/" << j;
                 effective_magnetic_field_[j]->hdf5_write(storage_file_name, s.str());
             }
+            if (ctx_.comm().rank() == 0 && !ctx_.full_potential()) {
+                HDF5_tree fout(storage_file_name, false);
+                for (int j = 0; j < ctx_.unit_cell().num_atoms(); j++) {
+                    fout["unit_cell"]["atoms"][j].write("D_operator", ctx_.unit_cell().atom(j).d_mtrx());
+                }
+            }
             comm_.barrier();
         }
         
@@ -885,6 +891,13 @@ class Potential
             
             if (ctx_.full_potential()) {
                 update_atomic_potential();
+            }
+
+            if (!ctx_.full_potential()) {
+                HDF5_tree fout(storage_file_name, false);
+                for (int j = 0; j < ctx_.unit_cell().num_atoms(); j++) {
+                    fout["unit_cell"]["atoms"][j].read("D_operator", ctx_.unit_cell().atom(j).d_mtrx());
+                }
             }
         }
         

@@ -53,7 +53,9 @@ class K_point
         vector3d<double> vk_;
 
         /// List of G-vectors with |G+k| < cutoff.
-        Gvec gkvec_;
+        std::unique_ptr<Gvec> gkvec_;
+        
+        std::unique_ptr<Gvec_partition> gkvec_partition_;
 
         /// First-variational eigen values
         std::vector<double> fv_eigen_values_;
@@ -96,10 +98,16 @@ class K_point
 
         std::unique_ptr<Matching_coefficients> alm_coeffs_loc_{nullptr};
 
+        /// Mapping between local row and global G+k vecotor index.
+        /** Used by matching_coefficients class. */
         std::vector<int> igk_row_;
 
+        /// Mapping between local column and global G+k vecotor index.
+        /** Used by matching_coefficients class. */
         std::vector<int> igk_col_;
 
+        /// Mapping between local and global G+k vecotor index.
+        /** Used by matching_coefficients class. */
         std::vector<int> igk_loc_;
 
         /// Number of G+k vectors distributed along rows of MPI grid
@@ -142,6 +150,10 @@ class K_point
         int num_ranks_row_;
 
         std::unique_ptr<Beta_projectors> beta_projectors_{nullptr};
+
+        std::unique_ptr<Beta_projectors> beta_projectors_row_{nullptr};
+
+        std::unique_ptr<Beta_projectors> beta_projectors_col_{nullptr};
 
         /// Preconditioner matrix for Chebyshev solver.
         mdarray<double_complex, 3> p_mtrx_;
@@ -193,7 +205,7 @@ class K_point
         {
             PROFILE("sirius::K_point::generate_gkvec");
 
-            if (ctx_.full_potential() && (gk_cutoff__ * unit_cell_.max_mt_radius() > ctx_.lmax_apw())) {
+            if (ctx_.full_potential() && (gk_cutoff__ * unit_cell_.max_mt_radius() > ctx_.lmax_apw()) && comm_.rank() == 0) {
                 std::stringstream s;
                 s << "G+k cutoff (" << gk_cutoff__ << ") is too large for a given lmax ("
                   << ctx_.lmax_apw() << ") and a maximum MT radius (" << unit_cell_.max_mt_radius() << ")" << std::endl
@@ -211,10 +223,13 @@ class K_point
 
             /* create G+k vectors; communicator of the coarse FFT grid is used because wave-functions will be transformed
              * only on the coarse grid; G+k-vectors will be distributed between MPI ranks assigned to the k-point */
-            gkvec_ = Gvec(vk_, ctx_.unit_cell().reciprocal_lattice_vectors(), gk_cutoff__, comm(), ctx_.comm_fft_coarse(),
-                          ctx_.comm_ortho_fft_coarse(), ctx_.gamma_point());
+            gkvec_ = std::unique_ptr<Gvec>(new Gvec(vk_, ctx_.unit_cell().reciprocal_lattice_vectors(), gk_cutoff__, comm(),
+                                                    ctx_.gamma_point()));
 
-            gkvec_offset_ = gkvec_.gvec_offset(comm_.rank());
+            gkvec_partition_ = std::unique_ptr<Gvec_partition>(new Gvec_partition(*gkvec_, ctx_.comm_fft_coarse(),
+                                                                                  ctx_.comm_band_ortho_fft_coarse()));
+
+            gkvec_offset_ = gkvec().gvec_offset(comm().rank());
         }
 
         /// Initialize the k-point related arrays and data.
@@ -284,7 +299,7 @@ class K_point
         /// Total number of G+k vectors within the cutoff distance
         inline int num_gkvec() const
         {
-            return gkvec_.num_gvec();
+            return gkvec_->num_gvec();
         }
 
         /// Total number of muffin-tin and plane-wave expansion coefficients for the wave-functions.
@@ -342,23 +357,27 @@ class K_point
             std::memcpy(&band_energies_[0], band_energies, ctx_.num_bands() * sizeof(double));
         }
 
-        inline double band_occupancy(int j) const
+        inline double band_occupancy(int j__) const
         {
-            return band_occupancies_[j];
+            assert(j__ >= 0 && j__ < static_cast<int>(band_occupancies_.size()));
+            return band_occupancies_[j__];
         }
 
-        inline double& band_occupancy(int j)
+        inline double& band_occupancy(int j__)
         {
-            return band_occupancies_[j];
+            assert(j__ >= 0 && j__ < static_cast<int>(band_occupancies_.size()));
+            return band_occupancies_[j__];
         }
 
-        inline double band_energy(int j) const
+        inline double band_energy(int j__) const
         {
-            return band_energies_[j];
+            assert(j__ >= 0 && j__ < static_cast<int>(band_energies_.size()));
+            return band_energies_[j__];
         }
 
         inline double& band_energy(int j__)
         {
+            assert(j__ >= 0 && j__ < static_cast<int>(band_energies_.size()));
             return band_energies_[j__];
         }
 
@@ -402,7 +421,7 @@ class K_point
             if (hubbard_wave_functions_ != nullptr) {
                 return;
             }
-            hubbard_wave_functions_ = std::unique_ptr<Wave_functions>(new Wave_functions(gkvec(),
+            hubbard_wave_functions_ = std::unique_ptr<Wave_functions>(new Wave_functions(gkvec_partition(),
                                                                                          size,
                                                                                          ctx_.num_spins()));
         }
@@ -431,7 +450,7 @@ class K_point
         /// Local number of G+k vectors in case of flat distribution.
         inline int num_gkvec_loc() const
         {
-            return gkvec_.gvec_count(comm_.rank());
+            return gkvec().count();
         }
 
         /// Return global index of G+k vector.
@@ -493,14 +512,29 @@ class K_point
             return igk_loc_[idx__];
         }
 
+        inline std::vector<int> const& igk_loc() const
+        {
+            return igk_loc_;
+        }
+
         inline int igk_row(int idx__) const
         {
             return igk_row_[idx__];
         }
 
+        inline std::vector<int> const& igk_row() const
+        {
+            return igk_row_;
+        }
+
         inline int igk_col(int idx__) const
         {
             return igk_col_[idx__];
+        }
+
+        inline std::vector<int> const& igk_col() const
+        {
+            return igk_col_;
         }
 
         inline int num_ranks_row() const
@@ -585,7 +619,12 @@ class K_point
 
         inline Gvec const& gkvec() const
         {
-            return gkvec_;
+            return *gkvec_;
+        }
+
+        inline Gvec_partition const& gkvec_partition() const
+        {
+            return *gkvec_partition_;
         }
 
         inline Matching_coefficients const& alm_coeffs_row()
@@ -632,6 +671,18 @@ class K_point
         {
             assert(beta_projectors_ != nullptr);
             return *beta_projectors_;
+        }
+
+        Beta_projectors& beta_projectors_row()
+        {
+            assert(beta_projectors_ != nullptr);
+            return *beta_projectors_row_;
+        }
+
+        Beta_projectors& beta_projectors_col()
+        {
+            assert(beta_projectors_ != nullptr);
+            return *beta_projectors_col_;
         }
 };
 

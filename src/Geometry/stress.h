@@ -145,17 +145,14 @@ class Stress {
             for (int igloc = 0; igloc < kp->num_gkvec_loc(); igloc++) {
                 int ig = kp->idxgk(igloc);
                 auto Gk = kp->gkvec().gkvec_cart(ig);
-                
 
                 double d{0};
                 for (int ispin = 0; ispin < ctx_.num_spins(); ispin++ ) {
                     int spin_bnd_offset = ctx_.num_mag_dims() == 1 ? ispin * ctx_.num_fv_states() : 0;
-                    for (int i = 0; i < (ctx_.num_mag_dims() == 1 ? ctx_.num_fv_states() : ctx_.num_bands()); i++) {
+                    for (int i = 0; i < kp->num_occupied_bands(ispin); i++) {
                         double f = kp->band_occupancy(i + spin_bnd_offset);
-                        if (f > 1e-12) {
-                            auto z = kp->spinor_wave_functions().pw_coeffs(ispin).prime(igloc, i);
-                            d += f * (std::pow(z.real(), 2) + std::pow(z.imag(), 2));
-                        }
+                        auto z = kp->spinor_wave_functions().pw_coeffs(ispin).prime(igloc, i);
+                        d += f * (std::pow(z.real(), 2) + std::pow(z.imag(), 2));
                     }
                 }
                 d *= kp->weight();
@@ -542,7 +539,7 @@ class Stress {
             }
             #endif
 
-            Beta_projectors_strain_deriv bp_strain_deriv(ctx_, kp->gkvec());
+            Beta_projectors_strain_deriv bp_strain_deriv(ctx_, kp->gkvec(), kp->igk_loc());
 
             Non_local_functor<T, 9> nlf(ctx_, bp_strain_deriv);
 
@@ -767,7 +764,7 @@ class Stress {
 
         if (potential_.is_gradient_correction()) {
 
-            Smooth_periodic_function<double> rhovc(ctx_.fft(), ctx_.gvec());
+            Smooth_periodic_function<double> rhovc(ctx_.fft(), ctx_.gvec_partition());
             rhovc.zero();
             rhovc.add(density_.rho());
             rhovc.add(density_.rho_pseudo_core());

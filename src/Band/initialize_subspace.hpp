@@ -22,7 +22,12 @@ inline void Band::initialize_subspace(K_point_set& kset__, Hamiltonian& H__) con
         }
     }
 
-    H__.local_op().prepare(ctx_.gvec_coarse(), ctx_.num_mag_dims(), H__.potential());
+    H__.local_op().prepare(H__.potential());
+    if (ctx_.gamma_point() && (ctx_.so_correction() == false)) {
+        H__.prepare<double>();
+    } else {
+        H__.prepare<double_complex>();
+    }
 
     for (int ikloc = 0; ikloc < kset__.spl_num_kpoints().local_size(); ikloc++) {
         int ik  = kset__.spl_num_kpoints(ikloc);
@@ -33,6 +38,7 @@ inline void Band::initialize_subspace(K_point_set& kset__, Hamiltonian& H__) con
             initialize_subspace<double_complex>(kp, H__, N);
         }
     }
+    H__.dismiss();
     H__.local_op().dismiss();
 
     /* reset the energies for the iterative solver to do at least two steps */
@@ -53,14 +59,14 @@ Band::initialize_subspace(K_point* kp__, Hamiltonian &H__, int num_ao__) const
     /* number of basis functions */
     int num_phi = std::max(num_ao__, ctx_.num_fv_states());
 
-    int num_sc = (ctx_.num_mag_dims() == 3) ? 2 : 1;
+    const int num_sc = (ctx_.num_mag_dims() == 3) ? 2 : 1;
 
-    int num_spin_steps = (ctx_.num_mag_dims() == 3) ? 1 : ctx_.num_spins();
+    const int num_spin_steps = (ctx_.num_mag_dims() == 3) ? 1 : ctx_.num_spins();
 
     int num_phi_tot = (ctx_.num_mag_dims() == 3) ? num_phi * 2 : num_phi;
 
     /* initial basis functions */
-    Wave_functions phi(kp__->gkvec(), num_phi_tot, num_sc);
+    Wave_functions phi(kp__->gkvec_partition(), num_phi_tot, num_sc);
     for (int ispn = 0; ispn < num_sc; ispn++) {
         phi.pw_coeffs(ispn).prime().zero();
     }
@@ -138,17 +144,14 @@ Band::initialize_subspace(K_point* kp__, Hamiltonian &H__, int num_ao__) const
     /* short notation for number of target wave-functions */
     int num_bands = (ctx_.num_mag_dims() == 3) ? ctx_.num_bands() : ctx_.num_fv_states();
 
-    ctx_.fft_coarse().prepare(kp__->gkvec().partition());
-    H__.local_op().prepare(kp__->gkvec());
-
-    D_operator<T> d_op(ctx_, kp__->beta_projectors());
-    Q_operator<T> q_op(ctx_, kp__->beta_projectors());
+    ctx_.fft_coarse().prepare(kp__->gkvec_partition());
+    H__.local_op().prepare(kp__->gkvec_partition());
 
     /* allocate wave-functions */
-    Wave_functions hphi(kp__->gkvec(), num_phi_tot, num_sc);
-    Wave_functions ophi(kp__->gkvec(), num_phi_tot, num_sc);
+    Wave_functions hphi(kp__->gkvec_partition(), num_phi_tot, num_sc);
+    Wave_functions ophi(kp__->gkvec_partition(), num_phi_tot, num_sc);
     /* temporary wave-functions required as a storage during orthogonalization */
-    Wave_functions wf_tmp(kp__->gkvec(), num_phi_tot, num_sc);
+    Wave_functions wf_tmp(kp__->gkvec_partition(), num_phi_tot, num_sc);
 
     int bs        = ctx_.cyclic_block_size();
     auto mem_type = (ctx_.std_evp_solver_type() == ev_solver_t::magma) ? memory_t::host_pinned : memory_t::host;
@@ -205,7 +208,7 @@ Band::initialize_subspace(K_point* kp__, Hamiltonian &H__, int num_ao__) const
 
     for (int ispn_step = 0; ispn_step < num_spin_steps; ispn_step++) {
         /* apply Hamiltonian and overlap operators to the new basis functions */
-        H__.apply_h_s<T>(kp__, (ctx_.num_mag_dims() == 3) ? 2 : ispn_step, 0, num_phi_tot, phi, hphi, ophi, d_op, q_op);
+        H__.apply_h_s<T>(kp__, (ctx_.num_mag_dims() == 3) ? 2 : ispn_step, 0, num_phi_tot, phi, hphi, ophi);
 
         /* do some checks */
         if (ctx_.control().verification_ >= 1) {
@@ -273,7 +276,7 @@ Band::initialize_subspace(K_point* kp__, Hamiltonian &H__, int num_ao__) const
 
         /* compute wave-functions */
         /* \Psi_{i} = \sum_{mu} \phi_{mu} * Z_{mu, i} */
-        transform<T>(ctx_.processing_unit(), (ctx_.num_mag_dims() == 3) ? 2 : ispn_step, {&phi}, 0, num_phi_tot, evec, 0, 0, 
+        transform<T>(ctx_.processing_unit(), (ctx_.num_mag_dims() == 3) ? 2 : ispn_step, {&phi}, 0, num_phi_tot, evec, 0, 0,
                     {&kp__->spinor_wave_functions()}, 0, num_bands);
 
         for (int j = 0; j < num_bands; j++) {
@@ -302,7 +305,7 @@ Band::initialize_subspace(K_point* kp__, Hamiltonian &H__, int num_ao__) const
         }
     }
 #endif
-    
+
     kp__->beta_projectors().dismiss();
     ctx_.fft_coarse().dismiss();
 }

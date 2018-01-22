@@ -31,22 +31,22 @@ std::unique_ptr<sirius::Simulation_context> sim_ctx{nullptr};
 std::unique_ptr<sirius::Density> density{nullptr};
 
 /// Pointer to Potential class, implicitly used by Fortran side.
-sirius::Potential* potential = nullptr;
+std::unique_ptr<sirius::Potential> potential{nullptr};
 
 /// Pointer to the Hamiltonian
-sirius:: Hamiltonian* H_ = nullptr;
+std::unique_ptr<sirius:: Hamiltonian> hamiltonian{nullptr};
 
 /// List of pointers to the sets of k-points.
 std::vector<sirius::K_point_set*> kset_list;
 
 /// DFT ground state wrapper
-sirius::DFT_ground_state* dft_ground_state = nullptr;
+std::unique_ptr<sirius::DFT_ground_state> dft_ground_state{nullptr};
 
 /// List of timers created on the Fortran side.
 std::map<std::string, sddk::timer*> ftimers;
 
 std::unique_ptr<sirius::Stress> stress_tensor{nullptr};
-std::unique_ptr<sirius::Forces_PS> forces{nullptr};
+std::unique_ptr<sirius::Force> forces{nullptr};
 
 extern "C" {
 
@@ -61,25 +61,17 @@ extern "C" {
     call sirius_initialize(0)
     \endcode
  */
-void sirius_initialize(ftn_int* call_mpi_init__)
+void sirius_initialize(ftn_bool* call_mpi_init__)
 {
-    bool call_mpi_init = (*call_mpi_init__ != 0) ? true : false;
-    sirius::initialize(call_mpi_init);
+    sirius::initialize(*call_mpi_init__);
 }
 
 /// Clear global variables and destroy all objects
 void sirius_clear(void)
 {
     density = nullptr;
-
-    if (potential != nullptr) {
-        delete potential;
-        potential = nullptr;
-    }
-    if (dft_ground_state != nullptr) {
-        delete dft_ground_state;
-        dft_ground_state = nullptr;
-    }
+    potential = nullptr;
+    dft_ground_state = nullptr;
     for (size_t i = 0; i < kset_list.size(); i++) {
         if (kset_list[i] != nullptr) {
             delete kset_list[i];
@@ -91,10 +83,9 @@ void sirius_clear(void)
     kset_list.clear();
 }
 
-void sirius_finalize(ftn_int* call_mpi_fin__)
+void sirius_finalize(ftn_bool* call_mpi_fin__)
 {
-    bool call_mpi_fin = (*call_mpi_fin__ != 0) ? true : false;
-    sirius::finalize(call_mpi_fin);
+    sirius::finalize(*call_mpi_fin__);
 }
 
 void sirius_create_simulation_context(const char* config_file_name__)
@@ -132,16 +123,13 @@ void sirius_create_potential(ftn_double* veffit__,
                              ftn_double* beffit__,
                              ftn_double* beffmt__)
 {
-    potential = new sirius::Potential(*sim_ctx);
+    potential = std::unique_ptr<sirius::Potential>(new sirius::Potential(*sim_ctx));
     potential->set_effective_potential_ptr(veffmt__, veffit__);
     potential->set_effective_magnetic_field_ptr(beffmt__, beffit__);
 }
 
 void sirius_delete_potential()
 {
-    if (potential != nullptr) {
-        delete potential;
-    }
     potential = nullptr;
 }
 
@@ -227,15 +215,14 @@ void sirius_create_ground_state(int32_t* kset_id__)
         TERMINATE("dft_ground_state object is already allocate");
     }
 
-    H_ = new sirius::Hamiltonian(*sim_ctx, *potential);
-    dft_ground_state = new sirius::DFT_ground_state(*sim_ctx, *H_, *density, *kset_list[*kset_id__]);
+    hamiltonian = std::unique_ptr<sirius::Hamiltonian>(new sirius::Hamiltonian(*sim_ctx, *potential));
+    dft_ground_state = std::unique_ptr<sirius::DFT_ground_state>(new sirius::DFT_ground_state(*sim_ctx, *hamiltonian, *density, *kset_list[*kset_id__]));
 }
 
 void sirius_delete_ground_state()
 {
-    delete dft_ground_state;
-    delete H_;
     dft_ground_state = nullptr;
+    hamiltonian = nullptr;
 }
 
 void sirius_set_lmax_apw(int32_t* lmax_apw__)
@@ -420,7 +407,7 @@ void sirius_set_atom_type_hubbard(char const* label__,
                                   double const* J0_)
 {
     auto& type = sim_ctx->unit_cell().atom_type(std::string(label__));
-    if(hub_correction > 0) {
+    if (*hub_correction > 0) {
         type.set_hubbard_correction(true);
         type.set_hubbard_alpha(*alpha_);
         type.set_hubbard_beta(*alpha_);
@@ -760,7 +747,7 @@ void sirius_generate_effective_potential()
 
 void sirius_initialize_subspace(ftn_int* kset_id__)
 {
-    dft_ground_state->band().initialize_subspace(*kset_list[*kset_id__], *H_);
+    dft_ground_state->band().initialize_subspace(*kset_list[*kset_id__], *hamiltonian);
 }
 
 void sirius_generate_density(int32_t* kset_id__)
@@ -771,8 +758,15 @@ void sirius_generate_density(int32_t* kset_id__)
 void sirius_generate_valence_density(int32_t* kset_id__)
 {
     density->generate_valence(*kset_list[*kset_id__]);
-    /* only PW coeffs have been generated; transfrom them to real space */
-    density->fft_transform(1);
+    if (sim_ctx->full_potential()) {
+        /* only PW coeffs have been generated; transfrom them to real space */
+        density->fft_transform(1);
+        /* MT part was calculated for local number of atoms; synchronize to global array */
+        density->rho().sync_mt();
+        for (int j = 0; j < sim_ctx->num_mag_dims(); j++) {
+            density->magnetization(j).sync_mt();
+        }
+    }
 }
 
 void sirius_augment_density(int32_t* kset_id__)
@@ -806,7 +800,7 @@ void sirius_find_eigen_states(int32_t* kset_id__,
                               int32_t* precompute__)
 {
     bool precompute = (*precompute__) ? true : false;
-    dft_ground_state->band().solve_for_kset(*kset_list[*kset_id__], *H_, precompute);
+    dft_ground_state->band().solve_for_kset(*kset_list[*kset_id__], *hamiltonian, precompute);
 }
 
 void sirius_find_band_occupancies(int32_t* kset_id__)
@@ -819,20 +813,26 @@ void sirius_get_energy_fermi(int32_t* kset_id__, double* efermi__)
     *efermi__ = kset_list[*kset_id__]->energy_fermi();
 }
 
-void sirius_set_band_occupancies(int32_t* kset_id__,
-                                 int32_t* ik__,
-                                 double* band_occupancies__)
+void sirius_set_band_occupancies(ftn_int*    kset_id__,
+                                 ftn_int*    ik__,
+                                 ftn_double* band_occupancies__,
+                                 ftn_int*    num_bands__)
 {
     int ik = *ik__ - 1;
-    kset_list[*kset_id__]->set_band_occupancies(ik, band_occupancies__);
+    for (int i = 0; i < *num_bands__; i++) {
+        (*kset_list[*kset_id__])[ik]->band_occupancy(i) = band_occupancies__[i];
+    }
 }
 
-void sirius_get_band_energies(int32_t* kset_id__,
-                              int32_t* ik__,
-                              double* band_energies__)
+void sirius_get_band_energies(ftn_int*    kset_id__,
+                              ftn_int*    ik__,
+                              ftn_double* band_energies__,
+                              ftn_int*    num_bands__) 
 {
     int ik = *ik__ - 1;
-    kset_list[*kset_id__]->get_band_energies(ik, band_energies__);
+    for (int i = 0; i < *num_bands__; i++) {
+        band_energies__[i] = (*kset_list[*kset_id__])[ik]->band_energy(i);
+    }
 }
 
 void sirius_get_band_occupancies(int32_t* kset_id, int32_t* ik_, double* band_occupancies)
@@ -843,7 +843,9 @@ void sirius_get_band_occupancies(int32_t* kset_id, int32_t* ik_, double* band_oc
 
 void sirius_print_timers(void)
 {
-    sddk::timer::print();
+    if (sim_ctx->comm().rank() == 0) {
+        sddk::timer::print();
+    }
 }
 
 void sirius_start_timer(ftn_char name__)
@@ -873,6 +875,11 @@ void sirius_save_density(void)
 void sirius_load_potential(void)
 {
     potential->load();
+}
+
+void sirius_load_density(void)
+{
+    density->load();
 }
 
 //== void FORTRAN(sirius_save_wave_functions)(int32_t* kset_id)
@@ -1101,15 +1108,6 @@ void FORTRAN(sirius_set_so_correction)(int32_t* so_correction)
     }
 }
 
-void FORTRAN(sirius_set_uj_correction)(int32_t* uj_correction)
-{
-    if (*uj_correction != 0) {
-        sim_ctx->set_uj_correction(true);
-    } else {
-        sim_ctx->set_uj_correction(false);
-    }
-}
-
 void sirius_get_energy_tot(double* total_energy__)
 {
     *total_energy__ = dft_ground_state->total_energy();
@@ -1119,7 +1117,6 @@ void sirius_get_energy_ewald(double* ewald_energy__)
 {
     *ewald_energy__ = dft_ground_state->energy_ewald();
 }
-
 
 void sirius_add_atom_type_aw_descriptor(char const* label__,
                                         int32_t const* n__,
@@ -3182,7 +3179,7 @@ void sirius_get_pw_coeffs_real(ftn_char    atom_type__,
 void sirius_calculate_forces(ftn_int* kset_id__)
 {
     auto& kset = *kset_list[*kset_id__];
-    forces = std::unique_ptr<sirius::Forces_PS>(new sirius::Forces_PS(*sim_ctx, *density, *potential, kset));
+    forces = std::unique_ptr<sirius::Force>(new sirius::Force(*sim_ctx, *density, *potential, kset));
 }
 
 void sirius_get_forces(ftn_char label__, ftn_double* forces__)
@@ -3310,10 +3307,10 @@ void sirius_set_hubbard_correction(int32_t *hubbard_correction_)
 
 void sirius_set_hubbard_occupations(ftn_double_complex *occ, ftn_int *ld)
 {
-    H_->U().set_hubbard_occupation_matrix(occ, *ld);
+    hamiltonian->U().set_hubbard_occupation_matrix(occ, *ld);
 }
 
 void sirius_set_hubbard_potential(ftn_double_complex *occ, ftn_int *ld)
 {
-    H_->U().set_hubbard_potential(occ, *ld);
+    hamiltonian->U().set_hubbard_potential(occ, *ld);
 }

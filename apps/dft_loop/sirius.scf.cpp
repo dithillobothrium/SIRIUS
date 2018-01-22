@@ -132,7 +132,7 @@ double ground_state(Simulation_context& ctx,
             s.print_info();
         }
         if (ctx.control().print_forces_) {
-            Forces_PS f(ctx, density, potential, ks);
+            Force f(ctx, density, potential, ks);
             f.print_info();
         }
     }
@@ -174,7 +174,7 @@ double ground_state(Simulation_context& ctx,
     /* wait for all */
     ctx.comm().barrier();
 
-    if (ctx.control().print_timers_)  {
+    if (ctx.control().print_timers_ && ctx.comm().rank() == 0)  {
         sddk::timer::print();
     }
 
@@ -261,7 +261,9 @@ void run_tasks(cmd_args const& args)
         Band band(*ctx);
         if (!ctx->full_potential()) {
             band.initialize_subspace(ks, H);
-            H.U().hubbard_compute_occupation_numbers(ks);
+            if (ctx->hubbard_correction()) {
+                H.U().hubbard_compute_occupation_numbers(ks);
+            }
         }
         band.solve_for_kset(ks, H, true);
 

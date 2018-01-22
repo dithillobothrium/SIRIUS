@@ -31,7 +31,7 @@
 #include "gvec.hpp"
 #ifdef __GPU
 #include "GPU/cufft.hpp"
-#include "GPU/fft_kernels.h"
+#include "GPU/fft_kernels.hpp"
 #endif
 
 namespace sddk {
@@ -124,7 +124,6 @@ class FFT3D
 
         std::vector<fftw_plan> plan_forward_xy_;
 
-
         bool is_gpu_direct_{false};
         
         #ifdef __GPU
@@ -177,12 +176,13 @@ class FFT3D
             int num_zcol_local = gvec_partition_->zcol_count_fft();
             double norm = 1.0 / size();
             
-            bool is_reduced = gvec_partition_->reduced();
+            bool is_reduced = gvec_partition_->gvec().reduced();
 
             assert(static_cast<int>(fft_buffer_aux__.size()) >= gvec_partition_->zcol_count_fft() * grid_.size(2));
             
             /* input/output data buffer is on GPU */
             if (data_ptr_type == GPU) {
+                sddk::timer t("sddk::FFT3D::transform_z_serial|gpu");
                 #ifdef __GPU
                 switch (direction) {
                     case 1: {
@@ -195,7 +195,7 @@ class FFT3D
                                              (cuDoubleComplex*)fft_buffer_aux__.at<GPU>(),
                                              cufft_stream_id);
                         if (is_reduced && comm_.rank() == 0) {
-                            cufft_load_x0y0_col_gpu(static_cast<int>(gvec_partition_->zcol(0).z.size()),
+                            cufft_load_x0y0_col_gpu(static_cast<int>(gvec_partition_->gvec().zcol(0).z.size()),
                                                     map_gvec_to_fft_buffer_x0y0_.at<GPU>(),
                                                     (cuDoubleComplex*)data__,
                                                     (cuDoubleComplex*)fft_buffer_aux__.at<GPU>(),
@@ -209,14 +209,14 @@ class FFT3D
                         
                         /* repack the buffer */
                         cufft_repack_z_buffer(direction,
-                                comm_.size(),
-                                grid_.size(2),
-                                num_zcol_local,
-                                max_zloc_size_,
-                                z_offsets_.at<GPU>(),
-                                z_sizes_.at<GPU>(),
-                                (cuDoubleComplex*)cufft_work_buf_.at<GPU>(),
-                                (cuDoubleComplex*)fft_buffer_aux__.at<GPU>());
+                                              comm_.size(),
+                                              grid_.size(2),
+                                              num_zcol_local,
+                                              max_zloc_size_,
+                                              z_offsets_.at<GPU>(),
+                                              z_sizes_.at<GPU>(),
+                                              (cuDoubleComplex*)cufft_work_buf_.at<GPU>(),
+                                              (cuDoubleComplex*)fft_buffer_aux__.at<GPU>());
 
                         break;
                     }
@@ -226,14 +226,14 @@ class FFT3D
                         
                         /* repack the buffer back*/
                         cufft_repack_z_buffer(direction,
-                                comm_.size(),
-                                grid_.size(2),
-                                num_zcol_local,
-                                max_zloc_size_,
-                                z_offsets_.at<GPU>(),
-                                z_sizes_.at<GPU>(),
-                                (cuDoubleComplex*)fft_buffer_aux__.at<GPU>(),
-                                (cuDoubleComplex*)cufft_work_buf_.at<GPU>());
+                                              comm_.size(),
+                                              grid_.size(2),
+                                              num_zcol_local,
+                                              max_zloc_size_,
+                                              z_offsets_.at<GPU>(),
+                                              z_sizes_.at<GPU>(),
+                                              (cuDoubleComplex*)fft_buffer_aux__.at<GPU>(),
+                                              (cuDoubleComplex*)cufft_work_buf_.at<GPU>());
                         
                         /* transform all columns */
                         cufft::forward_transform(cufft_plan_z_, (cuDoubleComplex*)fft_buffer_aux__.at<GPU>());
@@ -258,6 +258,7 @@ class FFT3D
             }
             
             if (data_ptr_type == CPU) {
+                sddk::timer t("sddk::FFT3D::transform_z_serial|cpu");
                 #pragma omp parallel
                 {
                     int tid = omp_get_thread_num();
@@ -273,16 +274,16 @@ class FFT3D
                                 /* clear z buffer */
                                 std::fill(fftw_buffer_z_[tid], fftw_buffer_z_[tid] + grid_.size(2), 0);
                                 /* load z column  of PW coefficients into buffer */
-                                for (size_t j = 0; j < gvec_partition_->zcol(icol).z.size(); j++) {
-                                    int z = grid().coord_by_gvec(gvec_partition_->zcol(icol).z[j], 2);
+                                for (size_t j = 0; j < gvec_partition_->gvec().zcol(icol).z.size(); j++) {
+                                    int z = grid().coord_by_gvec(gvec_partition_->gvec().zcol(icol).z[j], 2);
                                     fftw_buffer_z_[tid][z] = data__[data_offset + j];
                                 }
 
                                 /* column with {x,y} = {0,0} has only non-negative z components */
                                 if (is_reduced && !icol) {
                                     /* load remaining part of {0,0,z} column */
-                                    for (size_t j = 0; j < gvec_partition_->zcol(icol).z.size(); j++) {
-                                        int z = grid().coord_by_gvec(-gvec_partition_->zcol(icol).z[j], 2);
+                                    for (size_t j = 0; j < gvec_partition_->gvec().zcol(icol).z.size(); j++) {
+                                        int z = grid().coord_by_gvec(-gvec_partition_->gvec().zcol(icol).z[j], 2);
                                         fftw_buffer_z_[tid][z] = std::conj(data__[data_offset + j]);
                                     }
                                 }
@@ -318,8 +319,8 @@ class FFT3D
                                 fftw_execute(plan_forward_z_[tid]);
 
                                 /* save z column of PW coefficients */
-                                for (size_t j = 0; j < gvec_partition_->zcol(icol).z.size(); j++) {
-                                    int z = grid().coord_by_gvec(gvec_partition_->zcol(icol).z[j], 2);
+                                for (size_t j = 0; j < gvec_partition_->gvec().zcol(icol).z.size(); j++) {
+                                    int z = grid().coord_by_gvec(gvec_partition_->gvec().zcol(icol).z[j], 2);
                                     data__[data_offset + j] = fftw_buffer_z_[tid][z] * norm;
                                 }
 
@@ -344,16 +345,11 @@ class FFT3D
             int rank = comm_.rank();
 
             if (direction == -1) {
-                #ifdef __GPU
                 /* copy z-sticks to CPU */
                 if ((data_ptr_type == CPU && pu_ == GPU) || (data_ptr_type == GPU && !is_gpu_direct_ && comm_.size() > 1)) {
-                    
-//                    comm_.barrier();
                     sddk::timer t("sddk::FFT3D::transform_z|comm|d-1|DtoH");
-                    fft_buffer_aux__.copy_to_host(local_size_z_ * gvec_partition_->num_zcol());
-//                    comm_.barrier();
+                    fft_buffer_aux__.copy<memory_t::device, memory_t::host>(local_size_z_ * gvec_partition_->gvec().num_zcol());
                 }
-                #endif
                 
                 /* collect full sticks */
                 if (comm_.size() > 1) {
@@ -370,7 +366,7 @@ class FFT3D
                 
                     if (data_ptr_type == CPU || !is_gpu_direct_) {    
                         /* copy auxiliary buffer because it will be use as the output buffer in the following mpi_a2a */
-                        std::copy(&fft_buffer_aux__[0], &fft_buffer_aux__[0] + gvec_partition_->num_zcol() * local_size_z_,
+                        std::copy(&fft_buffer_aux__[0], &fft_buffer_aux__[0] + gvec_partition_->gvec().num_zcol() * local_size_z_,
                                   &fft_buffer_[0]);
 
                         comm_.barrier();
@@ -382,7 +378,7 @@ class FFT3D
                     #ifdef __GPU
                     if (data_ptr_type == GPU && is_gpu_direct_) {    
                         /* copy auxiliary buffer because it will be use as the output buffer in the following mpi_a2a */
-                        acc::copy<double_complex>(fft_buffer_.at<GPU>(), fft_buffer_aux__.at<GPU>(), gvec_partition_->num_zcol() * local_size_z_);
+                        acc::copy<double_complex>(fft_buffer_.at<GPU>(), fft_buffer_aux__.at<GPU>(), gvec_partition_->gvec().num_zcol() * local_size_z_);
                         
                         comm_.barrier();
                         sddk::timer t("sddk::FFT3D::transform_z|comm|d-1|a2a_gpu");
@@ -408,11 +404,8 @@ class FFT3D
                 if (comm_.size() > 1) {
                     #ifdef __GPU
                     if (data_ptr_type == GPU && !is_gpu_direct_) {
-//                        comm_.barrier();
                         sddk::timer t("sddk::FFT3D::transform_z|comm|d1|DtoH");
                         fft_buffer_aux__.copy<memory_t::device, memory_t::host>(gvec_partition_->zcol_count_fft() * grid_.size(2));
-//                        comm_.barrier();
-                        t.stop();
                     }
                     #endif
 
@@ -436,7 +429,7 @@ class FFT3D
                         comm_.barrier();
                         t.stop();
                         /* copy local fractions of z-columns into auxiliary buffer */
-                        std::copy(&fft_buffer_[0], &fft_buffer_[0] + gvec_partition_->num_zcol() * local_size_z_,
+                        std::copy(&fft_buffer_[0], &fft_buffer_[0] + gvec_partition_->gvec().num_zcol() * local_size_z_,
                                   &fft_buffer_aux__[0]);
                     }
 
@@ -449,17 +442,14 @@ class FFT3D
                         comm_.barrier();
                         t.stop();
                         /* copy local fractions of z-columns into auxiliary buffer */
-                        acc::copy<double_complex>(fft_buffer_aux__.at<GPU>(), fft_buffer_.at<GPU>(), gvec_partition_->num_zcol() * local_size_z_);
+                        acc::copy<double_complex>(fft_buffer_aux__.at<GPU>(), fft_buffer_.at<GPU>(), gvec_partition_->gvec().num_zcol() * local_size_z_);
                     }
                     #endif
                 }
                 #ifdef __GPU
                 if ((data_ptr_type == CPU && pu_ == GPU) || (comm_.size() > 1 && data_ptr_type == GPU && !is_gpu_direct_ ) ) {
-//                        comm_.barrier();
-                        sddk::timer t("sddk::FFT3D::transform_z|comm|d1|HtoD");
-                        fft_buffer_aux__.copy<memory_t::host, memory_t::device>(local_size_z_ * gvec_partition_->num_zcol());
-//                        comm_.barrier();
-                        t.stop();
+                    sddk::timer t("sddk::FFT3D::transform_z|comm|d1|HtoD");
+                    fft_buffer_aux__.copy<memory_t::host, memory_t::device>(local_size_z_ * gvec_partition_->gvec().num_zcol());
                 }
                 #endif
             }
@@ -473,7 +463,7 @@ class FFT3D
 
             int size_xy = grid_.size(0) * grid_.size(1);
 
-            int is_reduced = gvec_partition_->reduced();
+            int is_reduced = gvec_partition_->gvec().reduced();
 
             #ifdef __GPU
             if (pu_ == GPU) {
@@ -486,7 +476,7 @@ class FFT3D
                                           grid_.size(0),
                                           grid_.size(1),
                                           local_size_z_,
-                                          gvec_partition_->num_zcol(),
+                                          gvec_partition_->gvec().num_zcol(),
                                           z_col_pos_.at<GPU>(),
                                           is_reduced,
                                           cufft_stream_id);
@@ -503,7 +493,7 @@ class FFT3D
                                         grid_.size(0),
                                         grid_.size(1),
                                         local_size_z_,
-                                        gvec_partition_->num_zcol(),
+                                        gvec_partition_->gvec().num_zcol(),
                                         z_col_pos_.at<GPU>(),
                                         cufft_stream_id);
                         break;
@@ -524,7 +514,7 @@ class FFT3D
                                 /* clear xy-buffer */
                                 std::fill(fftw_buffer_xy_[tid], fftw_buffer_xy_[tid] + size_xy, 0);
                                 /* load z-columns into proper location */
-                                for (int i = 0; i < gvec_partition_->num_zcol(); i++) {
+                                for (int i = 0; i < gvec_partition_->gvec().num_zcol(); i++) {
                                     fftw_buffer_xy_[tid][z_col_pos_(i, 0)] = fft_buffer_aux__[iz + i * local_size_z_];
 
                                     if (is_reduced && i) {
@@ -548,7 +538,7 @@ class FFT3D
                                 fftw_execute(plan_forward_xy_[tid]);
 
                                 /* get z-columns */
-                                for (int i = 0; i < gvec_partition_->num_zcol(); i++) {
+                                for (int i = 0; i < gvec_partition_->gvec().num_zcol(); i++) {
                                     fft_buffer_aux__[iz  + i * local_size_z_] = fftw_buffer_xy_[tid][z_col_pos_(i, 0)];
                                 }
 
@@ -570,7 +560,7 @@ class FFT3D
         {
             PROFILE("sddk::FFT3D::transform_xy");
 
-            if (!gvec_partition_->reduced()) {
+            if (!gvec_partition_->gvec().reduced()) {
                 TERMINATE("reduced set of G-vectors is required");
             }
 
@@ -588,7 +578,7 @@ class FFT3D
                                             grid_.size(0),
                                             grid_.size(1),
                                             local_size_z_,
-                                            gvec_partition_->num_zcol(),
+                                            gvec_partition_->gvec().num_zcol(),
                                             z_col_pos_.at<GPU>(),
                                             cufft_stream_id);
                         /* stream #0 executes FFT */
@@ -605,7 +595,7 @@ class FFT3D
                                           grid_.size(0),
                                           grid_.size(1),
                                           local_size_z_,
-                                          gvec_partition_->num_zcol(),
+                                          gvec_partition_->gvec().num_zcol(),
                                           z_col_pos_.at<GPU>(),
                                           cufft_stream_id);
                         break;
@@ -631,7 +621,7 @@ class FFT3D
                                     double_complex(0, 1) * fft_buffer_aux2__[iz];
 
                                 /* load remaining z-columns into proper location */
-                                for (int i = 1; i < gvec_partition_->num_zcol(); i++) {
+                                for (int i = 1; i < gvec_partition_->gvec().num_zcol(); i++) {
                                     /* {x, y} part */
                                     fftw_buffer_xy_[tid][z_col_pos_(i, 0)] = fft_buffer_aux1__[iz + i * local_size_z_] + 
                                         double_complex(0, 1) * fft_buffer_aux2__[iz + i * local_size_z_];
@@ -657,7 +647,7 @@ class FFT3D
                                 fftw_execute(plan_forward_xy_[tid]);
 
                                 /* get z-columns */
-                                for (int i = 0; i < gvec_partition_->num_zcol(); i++) {
+                                for (int i = 0; i < gvec_partition_->gvec().num_zcol(); i++) {
                                     fft_buffer_aux1__[iz  + i * local_size_z_] = 0.5 * 
                                         (fftw_buffer_xy_[tid][z_col_pos_(i, 0)] + std::conj(fftw_buffer_xy_[tid][z_col_pos_(i, 1)]));
 
@@ -805,11 +795,9 @@ class FFT3D
         /** \param [out] data CPU pointer to the real-space data. */
         inline void output(double* data__)
         {
-            #ifdef __GPU
             if (pu_ == GPU) {
-                fft_buffer_.copy_to_host();
+                fft_buffer_.copy<memory_t::device, memory_t::host>();
             }
-            #endif
             for (int i = 0; i < local_size(); i++) {
                 data__[i] = fft_buffer_[i].real();
             }
@@ -861,6 +849,16 @@ class FFT3D
             return offset_z_;
         }
 
+        inline int size_x() const
+        {
+            return grid_.size(0);
+        }
+
+        inline int size_y() const
+        {
+            return grid_.size(1);
+        }
+
         /// Direct access to the FFT buffer
         inline double_complex& buffer(int idx__)
         {
@@ -896,23 +894,27 @@ class FFT3D
         {
             PROFILE("sddk::FFT3D::prepare");
 
+            if (gvec_partition_) {
+                TERMINATE("FFT3D is already prepared for another G-vector partition");
+            }
+
             gvec_partition_ = &gvec__;
 
-            int nc = gvec__.reduced() ? 2 : 1;
+            int nc = gvec__.gvec().reduced() ? 2 : 1;
             
             sddk::timer t1("sddk::FFT3D::prepare|cpu");
             /* get positions of z-columns in xy plane */
-            z_col_pos_ = mdarray<int, 2>(gvec__.num_zcol(), nc, memory_t::host, "FFT3D.z_col_pos_");
+            z_col_pos_ = mdarray<int, 2>(gvec__.gvec().num_zcol(), nc, memory_t::host, "FFT3D.z_col_pos_");
             #pragma omp parallel for schedule(static)
-            for (int i = 0; i < gvec__.num_zcol(); i++) {
-                int x = grid().coord_by_gvec(gvec__.zcol(i).x, 0);
-                int y = grid().coord_by_gvec(gvec__.zcol(i).y, 1);
+            for (int i = 0; i < gvec__.gvec().num_zcol(); i++) {
+                int x = grid().coord_by_gvec(gvec__.gvec().zcol(i).x, 0);
+                int y = grid().coord_by_gvec(gvec__.gvec().zcol(i).y, 1);
                 assert(x >= 0 && x < grid().size(0));
                 assert(y >= 0 && y < grid().size(1));
                 z_col_pos_(i, 0) = x + y * grid_.size(0);
-                if (gvec__.reduced()) {
-                    x = grid().coord_by_gvec(-gvec__.zcol(i).x, 0);
-                    y = grid().coord_by_gvec(-gvec__.zcol(i).y, 1);
+                if (gvec__.gvec().reduced()) {
+                    x = grid().coord_by_gvec(-gvec__.gvec().zcol(i).x, 0);
+                    y = grid().coord_by_gvec(-gvec__.gvec().zcol(i).y, 1);
                     assert(x >= 0 && x < grid().size(0));
                     assert(y >= 0 && y < grid().size(1));
                     z_col_pos_(i, 1) = x + y * grid_.size(0);
@@ -924,18 +926,19 @@ class FFT3D
             if (pu_ == GPU) {
                 sddk::timer t2("sddk::FFT3D::prepare|gpu");
                 size_t work_size;
-                map_gvec_to_fft_buffer_ = mdarray<int, 1>(gvec__.gvec_count_fft(), memory_t::host | memory_t::device, "FFT3D.map_zcol_to_fft_buffer_");
+                map_gvec_to_fft_buffer_ = mdarray<int, 1>(gvec__.gvec_count_fft(), memory_t::host | memory_t::device,
+                                                          "FFT3D.map_zcol_to_fft_buffer_");
                 /* loop over local set of columns */
                 #pragma omp parallel for schedule(static)
                 for (int i = 0; i < gvec__.zcol_count_fft(); i++) {
                     /* global index of z-column */
                     int icol = gvec__.zcol_offset_fft() + i;
                     /* loop over z-colmn */
-                    for (size_t j = 0; j < gvec__.zcol(icol).z.size(); j++) {
+                    for (size_t j = 0; j < gvec__.gvec().zcol(icol).z.size(); j++) {
                         /* local index of the G-vector */
                         size_t ig = gvec__.zcol_offs(icol) + j;
                         /* coordinate inside FFT 1D bufer */
-                        int z = grid().coord_by_gvec(gvec__.zcol(icol).z[j], 2);
+                        int z = grid().coord_by_gvec(gvec__.gvec().zcol(icol).z[j], 2);
                         assert(z >= 0 && z < grid().size(2));
                         map_gvec_to_fft_buffer_[ig] = i * grid_.size(2) + z;
                     }
@@ -944,9 +947,10 @@ class FFT3D
                 
                 /* for the rank that stores {x=0,y=0} column we need to create a small second mapping */
                 if (gvec__.gvec().reduced() && comm_.rank() == 0) {
-                    map_gvec_to_fft_buffer_x0y0_ = mdarray<int, 1>(gvec__.zcol(0).z.size(), memory_t::host | memory_t::device, "FFT3D.map_zcol_to_fft_buffer_x0y0_");
-                    for (size_t j = 0; j < gvec__.zcol(0).z.size(); j++) {
-                        int z = grid().coord_by_gvec(-gvec__.zcol(0).z[j], 2);
+                    map_gvec_to_fft_buffer_x0y0_ = mdarray<int, 1>(gvec__.gvec().zcol(0).z.size(), memory_t::host | memory_t::device,
+                                                                   "FFT3D.map_zcol_to_fft_buffer_x0y0_");
+                    for (size_t j = 0; j < gvec__.gvec().zcol(0).z.size(); j++) {
+                        int z = grid().coord_by_gvec(-gvec__.gvec().zcol(0).z[j], 2);
                         assert(z >= 0 && z < grid().size(2));
                         map_gvec_to_fft_buffer_x0y0_[j] = z;
                     }
@@ -986,24 +990,24 @@ class FFT3D
                 fft_buffer_.allocate(memory_t::device);
 
                 z_col_pos_.allocate(memory_t::device);
-                z_col_pos_.copy_to_device();
+                z_col_pos_.copy<memory_t::host, memory_t::device>();
             }
             #endif
         }
 
         void dismiss()
         {
-            #ifdef __GPU
             if (pu_ == GPU) {
-                fft_buffer_aux1_.deallocate_on_device();
-                fft_buffer_aux2_.deallocate_on_device();
-                z_col_pos_.deallocate_on_device();
-                fft_buffer_.deallocate_on_device();
-                cufft_work_buf_.deallocate_on_device();
-                map_gvec_to_fft_buffer_.deallocate_on_device();
-                map_gvec_to_fft_buffer_x0y0_.deallocate_on_device();
+                fft_buffer_aux1_.deallocate(memory_t::device);
+                fft_buffer_aux2_.deallocate(memory_t::device);
+                z_col_pos_.deallocate(memory_t::device);
+                fft_buffer_.deallocate(memory_t::device);
+#ifdef __GPU
+                cufft_work_buf_.deallocate(memory_t::device);
+                map_gvec_to_fft_buffer_.deallocate(memory_t::device);
+                map_gvec_to_fft_buffer_x0y0_.deallocate(memory_t::device);
+#endif
             }
-            #endif
             gvec_partition_ = nullptr;
         }
         
@@ -1025,7 +1029,7 @@ class FFT3D
                 /* we need this buffer size for mpi_alltoall */
                 sz_max = std::max(grid_.size(2) * num_zcol_local, local_size());
             } else {
-                sz_max = grid_.size(2) * gvec_partition_->num_zcol();
+                sz_max = grid_.size(2) * gvec_partition_->gvec().num_zcol();
             }
             if (sz_max > fft_buffer_aux1_.size()) {
                 fft_buffer_aux1_ = mdarray<double_complex, 1>(sz_max, host_memory_type_, "fft_buffer_aux1_");
@@ -1061,7 +1065,7 @@ class FFT3D
                 TERMINATE("FFT3D is not ready");
             }
 
-            if (!gvec_partition_->reduced()) {
+            if (!gvec_partition_->gvec().reduced()) {
                 TERMINATE("reduced set of G-vectors is required");
             }
 
@@ -1073,7 +1077,7 @@ class FFT3D
                 /* we need this buffer for mpi_alltoall */
                 sz_max = std::max(grid_.size(2) * num_zcol_local, local_size());
             } else {
-                sz_max = grid_.size(2) * gvec_partition_->num_zcol();
+                sz_max = grid_.size(2) * gvec_partition_->gvec().num_zcol();
             }
             
             if (sz_max > fft_buffer_aux1_.size()) {

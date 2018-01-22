@@ -34,7 +34,7 @@ template <typename T>
 class Non_local_operator
 {
   protected:
-    Beta_projectors& beta_;
+    Simulation_context const& ctx__;
 
     device_t pu_;
 
@@ -53,13 +53,12 @@ class Non_local_operator
     Non_local_operator(Non_local_operator const& src)            = delete;
 
   public:
-    Non_local_operator(Beta_projectors& beta__, device_t pu__)
-        : beta_(beta__)
-        , pu_(pu__)
+    Non_local_operator(Simulation_context const& ctx_)
+        : ctx__(ctx_)
     {
         PROFILE("sirius::Non_local_operator::Non_local_operator");
-
-        auto& uc            = beta_.unit_cell();
+        pu_                 = this->ctx__.processing_unit();
+        auto& uc            = this->ctx__.unit_cell();
         packed_mtrx_offset_ = mdarray<int, 1>(uc.num_atoms());
         packed_mtrx_size_   = 0;
         for (int ia = 0; ia < uc.num_atoms(); ia++) {
@@ -78,7 +77,13 @@ class Non_local_operator
     {
     }
 
-    inline void apply(int chunk__, int ispn_block__, Wave_functions& op_phi__, int idx0__, int n__, matrix<T>& beta_phi__);
+    inline void apply(int chunk__,
+                      int ispn_block__,
+                      Wave_functions& op_phi__,
+                      int idx0__,
+                      int n__,
+                      Beta_projectors& beta_,
+                      matrix<T>& beta_phi__);
 
     inline T operator()(int xi1__, int xi2__, int ia__)
     {
@@ -87,7 +92,7 @@ class Non_local_operator
 
     inline T operator()(int xi1__, int xi2__, int ispn__, int ia__)
     {
-        int nbf = beta_.unit_cell().atom(ia__).mt_basis_size();
+        int nbf = this->ctx__.unit_cell().atom(ia__).mt_basis_size();
         return op_(packed_mtrx_offset_(ia__) + xi2__ * nbf + xi1__, ispn__);
     }
 };
@@ -98,6 +103,7 @@ inline void Non_local_operator<double_complex>::apply(int chunk__,
                                                       Wave_functions& op_phi__,
                                                       int idx0__,
                                                       int n__,
+                                                      Beta_projectors& beta_,
                                                       matrix<double_complex>& beta_phi__)
 {
     PROFILE("sirius::Non_local_operator::apply");
@@ -148,7 +154,8 @@ inline void Non_local_operator<double_complex>::apply(int chunk__,
         case CPU: {
             linalg<CPU>::gemm(0, 0, num_gkvec_loc, n__, nbeta, linalg_const<double_complex>::one(), beta_gk.at<CPU>(),
                               num_gkvec_loc, work_.at<CPU>(), nbeta, linalg_const<double_complex>::one(),
-                              op_phi__.pw_coeffs(jspn).prime().at<CPU>(0, idx0__), op_phi__.pw_coeffs(jspn).prime().ld());
+                              op_phi__.pw_coeffs(jspn).prime().at<CPU>(0, idx0__),
+                              op_phi__.pw_coeffs(jspn).prime().ld());
             break;
         }
         case GPU: {
@@ -159,7 +166,8 @@ inline void Non_local_operator<double_complex>::apply(int chunk__,
 
             linalg<GPU>::gemm(0, 0, num_gkvec_loc, n__, nbeta, &linalg_const<double_complex>::one(), beta_gk.at<GPU>(),
                               beta_gk.ld(), work_.at<GPU>(), nbeta, &linalg_const<double_complex>::one(),
-                              op_phi__.pw_coeffs(jspn).prime().at<GPU>(0, idx0__), op_phi__.pw_coeffs(jspn).prime().ld());
+                              op_phi__.pw_coeffs(jspn).prime().at<GPU>(0, idx0__),
+                              op_phi__.pw_coeffs(jspn).prime().ld());
             acc::sync_stream(-1);
 #endif
             break;
@@ -173,6 +181,7 @@ inline void Non_local_operator<double>::apply(int chunk__,
                                               Wave_functions& op_phi__,
                                               int idx0__,
                                               int n__,
+                                              Beta_projectors& beta_,
                                               matrix<double>& beta_phi__)
 {
     PROFILE("sirius::Non_local_operator::apply");
@@ -249,18 +258,11 @@ inline void Non_local_operator<double>::apply(int chunk__,
 template <typename T>
 class D_operator : public Non_local_operator<T>
 {
-  public:
-    D_operator(Simulation_context const& ctx__, Beta_projectors& beta__)
-        : Non_local_operator<T>(beta__, ctx__.processing_unit())
+  private:
+    void initialize()
     {
-        this->op_ = mdarray<T, 2>(this->packed_mtrx_size_, ctx__.num_mag_dims() + 1);
-        this->op_.zero();
-        /* D-matrix is complex in non-collinear case */
-        if (ctx__.num_mag_dims() == 3) {
-            assert((std::is_same<T, double_complex>::value));
-        }
 
-        auto& uc = this->beta_.unit_cell();
+        auto& uc = this->ctx__.unit_cell();
 
         for (int ia = 0; ia < uc.num_atoms(); ia++) {
             int nbf = uc.atom(ia).mt_basis_size();
@@ -276,9 +278,10 @@ class D_operator : public Non_local_operator<T>
                 for (int xi2 = 0; xi2 < nbf; xi2++) {
                     for (int xi1 = 0; xi1 < nbf; xi1++) {
                         int idx = xi2 * nbf + xi1;
-                        for (int s = 0; s < 4; s++)
+                        for (int s = 0; s < 4; s++) {
                             this->op_(this->packed_mtrx_offset_(ia) + idx, s) =
                                 type_wrapper<T>::bypass(uc.atom(ia).d_mtrx_so(xi1, xi2, s));
+                        }
                     }
                 }
             } else {
@@ -289,7 +292,7 @@ class D_operator : public Non_local_operator<T>
                 for (int xi2 = 0; xi2 < nbf; xi2++) {
                     for (int xi1 = 0; xi1 < nbf; xi1++) {
                         int idx = xi2 * nbf + xi1;
-                        switch (ctx__.num_mag_dims()) {
+                        switch (this->ctx__.num_mag_dims()) {
                             case 3: {
                                 double bx = uc.atom(ia).d_mtrx(xi1, xi2, 2);
                                 double by = uc.atom(ia).d_mtrx(xi1, xi2, 3);
@@ -319,7 +322,7 @@ class D_operator : public Non_local_operator<T>
             }
         }
 
-        if (ctx__.control().print_checksum_ && ctx__.comm().rank() == 0) {
+        if (this->ctx__.control().print_checksum_ && this->ctx__.comm().rank() == 0) {
             auto cs = this->op_.checksum();
             print_checksum("D_operator", cs);
         }
@@ -329,20 +332,29 @@ class D_operator : public Non_local_operator<T>
             this->op_.template copy<memory_t::host, memory_t::device>();
         }
     }
+
+  public:
+    D_operator(Simulation_context const& ctx_)
+        : Non_local_operator<T>(ctx_)
+    {
+        this->op_ = mdarray<T, 2>(this->packed_mtrx_size_, ctx_.num_mag_dims() + 1);
+        this->op_.zero();
+        /* D-matrix is complex in non-collinear case */
+        if (ctx_.num_mag_dims() == 3) {
+            assert((std::is_same<T, double_complex>::value));
+        }
+        initialize();
+    };
+
 };
 
 template <typename T>
 class Q_operator : public Non_local_operator<T>
 {
-  public:
-    Q_operator(Simulation_context const& ctx__, Beta_projectors& beta__)
-        : Non_local_operator<T>(beta__, ctx__.processing_unit())
+  private:
+    void initialize()
     {
-        /* Q-operator is independent of spin if there is no spin-orbit; however, it simplifies the apply()
-         * method if the Q-operator has a spin index */
-        this->op_ = mdarray<T, 2>(this->packed_mtrx_size_, ctx__.num_mag_dims() + 1);
-        this->op_.zero();
-        auto& uc = this->beta_.unit_cell();
+        auto& uc = this->ctx__.unit_cell();
         for (int ia = 0; ia < uc.num_atoms(); ia++) {
             int iat = uc.atom(ia).type().id();
             if (!uc.atom_type(iat).pp_desc().augment) {
@@ -353,7 +365,7 @@ class Q_operator : public Non_local_operator<T>
                 for (int xi1 = 0; xi1 < nbf; xi1++) {
                     /* The ultra soft pseudo potential has spin orbit coupling incorporated to it, so we
                        need to rotate the Q matrix */
-                    if (ctx__.unit_cell().atom_type(iat).pp_desc().spin_orbit_coupling) {
+                    if (this->ctx__.unit_cell().atom_type(iat).pp_desc().spin_orbit_coupling) {
                         /* this is nothing else than Eq.18 of Ref PRB 71, 115106 */
                         for (auto si = 0; si < 2; si++) {
                             for (auto sj = 0; sj < 2; sj++) {
@@ -366,7 +378,7 @@ class Q_operator : public Non_local_operator<T>
                                             /* The F coefficients are already "block diagonal" so we do a full
                                                summation. We actually rotate the q_matrices only */
                                             if (uc.atom(ia).type().compare_index_beta_functions(xi1, xi1p)) {
-                                                result += ctx__.augmentation_op(iat).q_mtrx(xi1p, xi2p) *
+                                                result += this->ctx__.augmentation_op(iat).q_mtrx(xi1p, xi2p) *
                                                           (uc.atom(ia).type().f_coefficients(xi1, xi1p, sj, 0) *
                                                                uc.atom(ia).type().f_coefficients(xi2p, xi2, 0, si) +
                                                            uc.atom(ia).type().f_coefficients(xi1, xi1p, sj, 1) *
@@ -388,15 +400,15 @@ class Q_operator : public Non_local_operator<T>
                             }
                         }
                     } else {
-                        for (int ispn = 0; ispn < ctx__.num_spins(); ispn++) {
+                        for (int ispn = 0; ispn < this->ctx__.num_spins(); ispn++) {
                             this->op_(this->packed_mtrx_offset_(ia) + xi2 * nbf + xi1, ispn) =
-                                ctx__.augmentation_op(iat).q_mtrx(xi1, xi2);
+                                this->ctx__.augmentation_op(iat).q_mtrx(xi1, xi2);
                         }
                     }
                 }
             }
         }
-        if (ctx__.control().print_checksum_ && ctx__.comm().rank() == 0) {
+        if (this->ctx__.control().print_checksum_ && this->ctx__.comm().rank() == 0) {
             auto cs = this->op_.checksum();
             print_checksum("Q_operator", cs);
         }
@@ -406,20 +418,31 @@ class Q_operator : public Non_local_operator<T>
             this->op_.template copy<memory_t::host, memory_t::device>();
         }
     }
+
+  public:
+    Q_operator(Simulation_context const& ctx_)
+        : Non_local_operator<T>(ctx_)
+    {
+        /* Q-operator is independent of spin if there is no spin-orbit; however, it simplifies the apply()
+         * method if the Q-operator has a spin index */
+        this->op_ = mdarray<T, 2>(this->packed_mtrx_size_, ctx_.num_mag_dims() + 1);
+        this->op_.zero();
+        initialize();
+    }
 };
 
 template <typename T>
 class P_operator : public Non_local_operator<T>
 {
   public:
-    P_operator(Simulation_context const& ctx__, Beta_projectors& beta__, mdarray<double_complex, 3>& p_mtrx__)
-        : Non_local_operator<T>(beta__, ctx__.processing_unit())
+    P_operator(Simulation_context const& ctx_, mdarray<double_complex, 3>& p_mtrx__)
+        : Non_local_operator<T>(ctx_)
     {
         /* Q-operator is independent of spin */
         this->op_ = mdarray<T, 2>(this->packed_mtrx_size_, 1);
         this->op_.zero();
 
-        auto& uc = this->beta_.unit_cell();
+        auto& uc = ctx_.unit_cell();
         for (int ia = 0; ia < uc.num_atoms(); ia++) {
             int iat = uc.atom(ia).type().id();
             if (!uc.atom_type(iat).pp_desc().augment) {
@@ -432,12 +455,10 @@ class P_operator : public Non_local_operator<T>
                 }
             }
         }
-#ifdef __GPU
         if (this->pu_ == GPU) {
             this->op_.allocate(memory_t::device);
-            this->op_.copy_to_device();
+            this->op_.template copy<memory_t::host, memory_t::device>();
         }
-#endif
     }
 };
 }

@@ -7,8 +7,7 @@ void Hamiltonian::apply_h(K_point* kp__,
                           int N__,
                           int n__,
                           Wave_functions& phi__,
-                          Wave_functions& hphi__,
-                          D_operator<T>& d_op) const
+                          Wave_functions& hphi__) const
 {
     PROFILE("sirius::Hamiltonian::apply_h");
 
@@ -87,9 +86,7 @@ void Hamiltonian::apply_h_s(K_point* kp__,
                             int n__,
                             Wave_functions& phi__,
                             Wave_functions& hphi__,
-                            Wave_functions& sphi__,
-                            D_operator<T>& d_op,
-                            Q_operator<T>& q_op) const
+                            Wave_functions& sphi__) const
 {
     PROFILE("sirius::Hamiltonian::apply_h_s");
 
@@ -156,32 +153,32 @@ void Hamiltonian::apply_h_s(K_point* kp__,
                 auto beta_phi = kp__->beta_projectors().inner<T>(i, phi__, ispn, N__, n__);
 
                 /* apply diagonal spin blocks */
-                d_op.apply(i, ispn, hphi__, N__, n__, beta_phi);
+                D<T>().apply(i, ispn, hphi__, N__, n__, kp__->beta_projectors(), beta_phi);
                 /* apply non-diagonal spin blocks */
                 /* xor 3 operator will map 0 to 3 and 1 to 2 */
-                d_op.apply(i, ispn ^ 3, hphi__, N__, n__, beta_phi);
+                D<T>().apply(i, ispn ^ 3, hphi__, N__, n__, kp__->beta_projectors(), beta_phi);
 
                 /* apply Q operator (diagonal in spin) */
-                q_op.apply(i, ispn, sphi__, N__, n__, beta_phi);
+                Q<T>().apply(i, ispn, sphi__, N__, n__, kp__->beta_projectors(), beta_phi);
                 /* apply non-diagonal spin blocks */
                 if (ctx_.so_correction()) {
-                    q_op.apply(i, ispn ^ 3, sphi__, N__, n__, beta_phi);
+                    Q<T>().apply(i, ispn ^ 3, sphi__, N__, n__, kp__->beta_projectors(), beta_phi);
                 }
             }
         } else { /* non-magnetic or collinear case */
 
             auto beta_phi = kp__->beta_projectors().inner<T>(i, phi__, ispn__, N__, n__);
 
-            d_op.apply(i, ispn__, hphi__, N__, n__, beta_phi);
-            q_op.apply(i, ispn__, sphi__, N__, n__, beta_phi);
+            D<T>().apply(i, ispn__, hphi__, N__, n__, kp__->beta_projectors(), beta_phi);
+            Q<T>().apply(i, ispn__, sphi__, N__, n__, kp__->beta_projectors(), beta_phi);
         }
     }
 
     /* apply the hubbard potential if relevant */
     if (ctx_.hubbard_correction() && !ctx_.gamma_point()) {
-        // note that the first function is called only one's in full
-        // version and will return immediately if the wave functions already exist
-        this->U().generate_atomic_orbitals(*kp__, q_op);
+
+        // return immediately if the wave functions already exist
+        this->U().generate_atomic_orbitals(*kp__, Q<T>());
 
         this->U().apply_hubbard_potential(*kp__, N__, n__, phi__, hphi__);
     }
@@ -218,7 +215,7 @@ inline void Hamiltonian::apply_fv_o(K_point* kp__,
     }
 
     /* interstitial part */
-    local_op_->apply_o(kp__->gkvec().partition(), N__, n__, phi__, ophi__);
+    local_op_->apply_o(N__, n__, phi__, ophi__);
 
     matrix<double_complex> alm(kp__->num_gkvec_loc(), unit_cell_.max_mt_aw_basis_size());
     matrix<double_complex> oalm(kp__->num_gkvec_loc(), unit_cell_.max_mt_aw_basis_size());
@@ -255,12 +252,12 @@ inline void Hamiltonian::apply_fv_o(K_point* kp__,
             }
             case GPU: {
 #ifdef __GPU
-                alm.copy_to_device();
+                alm.copy<memory_t::host, memory_t::device>();
                 /* tmp(lm, i) = A(G, lm)^{T} * C(G, i) */
                 linalg<GPU>::gemm(1, 0, naw, n__, kp__->num_gkvec_loc(), alm.at<GPU>(), alm.ld(),
                                   phi__.pw_coeffs(0).prime().at<GPU>(0, N__), phi__.pw_coeffs(0).prime().ld(), tmp.at<GPU>(),
                                   tmp.ld());
-                tmp.copy_to_host(naw * n__);
+                tmp.copy<memory_t::device, memory_t::host>(naw * n__);
 #endif
                 break;
             }
@@ -273,7 +270,7 @@ inline void Hamiltonian::apply_fv_o(K_point* kp__,
                 alm(ig, xi) = std::conj(alm(ig, xi));
             }
         }
-        
+
         switch (ctx_.processing_unit()) {
             case CPU: {
                 /* APW-APW contribution to overlap */
@@ -284,8 +281,8 @@ inline void Hamiltonian::apply_fv_o(K_point* kp__,
             }
             case GPU: {
 #ifdef __GPU
-                alm.copy_to_device();
-                tmp.copy_to_device(naw * n__);
+                alm.copy<memory_t::host, memory_t::device>();
+                tmp.copy<memory_t::host, memory_t::device>(naw * n__);
                 /* APW-APW contribution to overlap */
                 linalg<GPU>::gemm(0, 0, kp__->num_gkvec_loc(), n__, naw, &linalg_const<double_complex>::one(),
                                   alm.at<GPU>(), alm.ld(), tmp.at<GPU>(), tmp.ld(), &linalg_const<double_complex>::one(),
@@ -406,9 +403,9 @@ inline void Hamiltonian::apply_fv_h_o(K_point* kp__,
     /* interstitial part */
     if (N__ == 0) {
         /* don't apply to the pure local orbital basis functions */
-        local_op_->apply_h_o(kp__->gkvec().partition(), nlo__, n__ - nlo__, phi__, hphi__, ophi__);
+        local_op_->apply_h_o(nlo__, n__ - nlo__, phi__, hphi__, ophi__);
     } else {
-        local_op_->apply_h_o(kp__->gkvec().partition(), N__, n__, phi__, hphi__, ophi__);
+        local_op_->apply_h_o(N__, n__, phi__, hphi__, ophi__);
     }
 
     //if (ctx_.control().print_checksum_) {
@@ -692,79 +689,86 @@ inline void Hamiltonian::apply_fv_h_o(K_point* kp__,
 }
 
 // TODO: port to GPU
-inline void Hamiltonian::apply_magnetic_field(Wave_functions& fv_states__,
-                                              Gvec const& gkvec__,
+inline void Hamiltonian::apply_magnetic_field(K_point*                     kp__,
+                                              Wave_functions&              fv_states__,
                                               std::vector<Wave_functions>& hpsi__) const
 {
     PROFILE("sirius::Hamiltonian::apply_magnetic_field");
 
-    STOP();
+    assert(hpsi__.size() == 2 || hpsi__.size() == 3);
 
-//    assert(hpsi__.size() == 2 || hpsi__.size() == 3);
-//
-//    local_op_->apply_b(gkvec__.partition(), 0, ctx_.num_fv_states(), fv_states__, hpsi__);
-//
-//    mdarray<double_complex, 3> zm(unit_cell_.max_mt_basis_size(), unit_cell_.max_mt_basis_size(), ctx_.num_mag_dims());
-//
-//    for (int ialoc = 0; ialoc < fv_states__.spl_num_atoms().local_size(); ialoc++) {
-//        int ia            = fv_states__.spl_num_atoms()[ialoc];
-//        auto& atom        = unit_cell_.atom(ia);
-//        int offset        = fv_states__.offset_mt_coeffs(ialoc);
-//        int mt_basis_size = atom.type().mt_basis_size();
-//
-//        zm.zero();
-//
-//    /* only upper triangular part of zm is computed because it is a hermitian matrix */
-//        #pragma omp parallel for default(shared)
-//        for (int xi2 = 0; xi2 < mt_basis_size; xi2++) {
-//            int lm2    = atom.type().indexb(xi2).lm;
-//            int idxrf2 = atom.type().indexb(xi2).idxrf;
-//
-//            for (int i = 0; i < ctx_.num_mag_dims(); i++) {
-//                for (int xi1 = 0; xi1 <= xi2; xi1++) {
-//                    int lm1    = atom.type().indexb(xi1).lm;
-//                    int idxrf1 = atom.type().indexb(xi1).idxrf;
-//
-//                    zm(xi1, xi2, i) = gaunt_coefs_->sum_L3_gaunt(lm1, lm2, atom.b_radial_integrals(idxrf1, idxrf2, i));
-//                }
-//            }
-//        }
-//        /* compute bwf = B_z*|wf_j> */
-//        linalg<CPU>::hemm(0, 0, mt_basis_size, ctx_.num_fv_states(), linalg_const<double_complex>::one(), zm.at<CPU>(),
-//                          zm.ld(), fv_states__.mt_coeffs().prime().at<CPU>(offset, 0),
-//                          fv_states__.mt_coeffs().prime().ld(), linalg_const<double_complex>::zero(),
-//                          hpsi__[0].mt_coeffs().prime().at<CPU>(offset, 0), hpsi__[0].mt_coeffs().prime().ld());
-//
-//        /* compute bwf = (B_x - iB_y)|wf_j> */
-//        if (hpsi__.size() == 3) {
-//            /* reuse first (z) component of zm matrix to store (B_x - iB_y) */
-//            for (int xi2 = 0; xi2 < mt_basis_size; xi2++) {
-//                for (int xi1 = 0; xi1 <= xi2; xi1++) {
-//                    zm(xi1, xi2, 0) = zm(xi1, xi2, 1) - double_complex(0, 1) * zm(xi1, xi2, 2);
-//                }
-//
-//                /* remember: zm for x,y,z, components of magnetic field is hermitian and we computed
-//                 * only the upper triangular part */
-//                for (int xi1 = xi2 + 1; xi1 < mt_basis_size; xi1++) {
-//                    zm(xi1, xi2, 0) = std::conj(zm(xi2, xi1, 1)) - double_complex(0, 1) * std::conj(zm(xi2, xi1, 2));
-//                }
-//            }
-//
-//            linalg<CPU>::gemm(0, 0, mt_basis_size, ctx_.num_fv_states(), mt_basis_size, zm.at<CPU>(), zm.ld(),
-//                              fv_states__.mt_coeffs().prime().at<CPU>(offset, 0), fv_states__.mt_coeffs().prime().ld(),
-//                              hpsi__[2].mt_coeffs().prime().at<CPU>(offset, 0), hpsi__[2].mt_coeffs().prime().ld());
-//        }
-//    }
-//
-//    /* copy Bz|\psi> to -Bz|\psi> */
-//    for (int i = 0; i < ctx_.num_fv_states(); i++) {
-//        for (int j = 0; j < fv_states__.pw_coeffs().num_rows_loc(); j++) {
-//            hpsi__[1].pw_coeffs().prime(j, i) = -hpsi__[0].pw_coeffs().prime(j, i);
-//        }
-//        for (int j = 0; j < fv_states__.mt_coeffs().num_rows_loc(); j++) {
-//            hpsi__[1].mt_coeffs().prime(j, i) = -hpsi__[0].mt_coeffs().prime(j, i);
-//        }
-//    }
+    local_op_->apply_b(0, ctx_.num_fv_states(), fv_states__, hpsi__);
+
+    mdarray<double_complex, 3> zm(unit_cell_.max_mt_basis_size(), unit_cell_.max_mt_basis_size(), ctx_.num_mag_dims());
+
+    for (int ialoc = 0; ialoc < fv_states__.spl_num_atoms().local_size(); ialoc++) {
+        int ia            = fv_states__.spl_num_atoms()[ialoc];
+        auto& atom        = unit_cell_.atom(ia);
+        int offset        = fv_states__.offset_mt_coeffs(ialoc);
+        int mt_basis_size = atom.type().mt_basis_size();
+
+        zm.zero();
+
+        /* only upper triangular part of zm is computed because it is a hermitian matrix */
+        #pragma omp parallel for default(shared)
+        for (int xi2 = 0; xi2 < mt_basis_size; xi2++) {
+            int lm2    = atom.type().indexb(xi2).lm;
+            int idxrf2 = atom.type().indexb(xi2).idxrf;
+
+            for (int i = 0; i < ctx_.num_mag_dims(); i++) {
+                for (int xi1 = 0; xi1 <= xi2; xi1++) {
+                    int lm1    = atom.type().indexb(xi1).lm;
+                    int idxrf1 = atom.type().indexb(xi1).idxrf;
+
+                    zm(xi1, xi2, i) = gaunt_coefs_->sum_L3_gaunt(lm1, lm2, atom.b_radial_integrals(idxrf1, idxrf2, i));
+                }
+            }
+        }
+        /* compute bwf = B_z*|wf_j> */
+        linalg<CPU>::hemm(0, 0, mt_basis_size, ctx_.num_fv_states(),
+                          linalg_const<double_complex>::one(),
+                          zm.at<CPU>(),
+                          zm.ld(),
+                          fv_states__.mt_coeffs(0).prime().at<CPU>(offset, 0),
+                          fv_states__.mt_coeffs(0).prime().ld(),
+                          linalg_const<double_complex>::zero(),
+                          hpsi__[0].mt_coeffs(0).prime().at<CPU>(offset, 0),
+                          hpsi__[0].mt_coeffs(0).prime().ld());
+
+        /* compute bwf = (B_x - iB_y)|wf_j> */
+        if (hpsi__.size() == 3) {
+            /* reuse first (z) component of zm matrix to store (B_x - iB_y) */
+            for (int xi2 = 0; xi2 < mt_basis_size; xi2++) {
+                for (int xi1 = 0; xi1 <= xi2; xi1++) {
+                    zm(xi1, xi2, 0) = zm(xi1, xi2, 1) - double_complex(0, 1) * zm(xi1, xi2, 2);
+                }
+
+                /* remember: zm for x,y,z, components of magnetic field is hermitian and we computed
+                 * only the upper triangular part */
+                for (int xi1 = xi2 + 1; xi1 < mt_basis_size; xi1++) {
+                    zm(xi1, xi2, 0) = std::conj(zm(xi2, xi1, 1)) - double_complex(0, 1) * std::conj(zm(xi2, xi1, 2));
+                }
+            }
+
+            linalg<CPU>::gemm(0, 0, mt_basis_size, ctx_.num_fv_states(), mt_basis_size,
+                              zm.at<CPU>(),
+                              zm.ld(),
+                              fv_states__.mt_coeffs(0).prime().at<CPU>(offset, 0),
+                              fv_states__.mt_coeffs(0).prime().ld(),
+                              hpsi__[2].mt_coeffs(0).prime().at<CPU>(offset, 0),
+                              hpsi__[2].mt_coeffs(0).prime().ld());
+        }
+    }
+
+    /* copy Bz|\psi> to -Bz|\psi> */
+    for (int i = 0; i < ctx_.num_fv_states(); i++) {
+        for (int j = 0; j < fv_states__.pw_coeffs(0).num_rows_loc(); j++) {
+            hpsi__[1].pw_coeffs(0).prime(j, i) = -hpsi__[0].pw_coeffs(0).prime(j, i);
+        }
+        for (int j = 0; j < fv_states__.mt_coeffs(0).num_rows_loc(); j++) {
+            hpsi__[1].mt_coeffs(0).prime(j, i) = -hpsi__[0].mt_coeffs(0).prime(j, i);
+        }
+    }
 }
 
 //== template <spin_block_t sblock>

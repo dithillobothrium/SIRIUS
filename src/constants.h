@@ -25,8 +25,10 @@
 #ifndef __CONSTANTS_H__
 #define __CONSTANTS_H__
 
+#include <complex>
+
 const int major_version = 4;
-const int minor_version = 10;
+const int minor_version = 12;
 
 /// NIST value for the inverse fine structure (http://physics.nist.gov/cuu/Constants/index.html)
 const double speed_of_light = 137.035999139; 
