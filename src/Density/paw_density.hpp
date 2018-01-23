@@ -5,6 +5,12 @@
  *      Author: isivkov
  */
 
+/**
+ *
+ * Initialize PAW variables All-electron (AW) and pseudo (PS) density arrays.
+ * In case of spin orbit a small component of AE density is also initialized
+ */
+
 inline void Density::init_paw()
 {
     paw_density_data_.clear();
@@ -47,6 +53,9 @@ inline void Density::init_paw()
     }
 }
 
+/**
+ * Initializes Density Matrix as in Quantum Espresso
+ */
 inline void Density::init_density_matrix_for_paw()
 {
     density_matrix_.zero();
@@ -94,6 +103,45 @@ inline void Density::init_density_matrix_for_paw()
     }
 }
 
+/**
+ * Generates PAW all-electron(AE) and pseudo(PS) density in \f$lm\f$ components using density matrix \f$\rho_{ij}\f$,
+ * Gaunt coefficients and radial AE wave functions \f$\phi_i\f$.
+ * The variable \f$\phi_{l_i}(r) \phi_{l_j}(r)\f$ is precalculated and stored during reading from pseudopotential file
+ *
+ * In the case of non-collinear calculation density is calculated as 4-components variable  \f$ \rho^{\alpha} = (\rho, m_x, m_y, m_z),\ \alpha=0,1,2,3\f$
+ * While density matrix is stored as \f$(\rho^{00}_{ij}, \rho^{11}_{ij}, \rho^{10}_{ij}, \rho^{01}_{ij})\f$
+ *
+ * - AE density
+ * \f[
+ *      n^{\alpha}(\bf r ) \rightarrow n^{alpha}_{lm}(r) = \sum_{ij} \rho^{\alpha}_{ij} Gaunt(l_i, l, l_j\ |\ m_i, m, m_j) \phi_{l_i}(r) \phi_{l_j}(r)
+ * \f]
+ *
+ * - PS density together with compensation charge
+ *
+ * \f[
+ *      \tilde{n}^{\alpha}(\bf r ) + \hat{n}^{\alpha}(\bf r)  \rightarrow \tilde{n}^{\alpha}_{lm}(r) = \sum_{ij} \rho^{\alpha}_{ij} Gaunt(l_i, l, l_j\ |\ m_i, m, m_j)  ( \tilde\phi_{l_i}(r) \tilde\phi_{l_j}(r)  + Q^l_{l_i,l_j}(r) )
+ * \f]
+ *
+ * - Densities are converted from \f$lm\f$ representation to \f$\theta-\phi\f$ representation to use later for XC potential calculation
+ *
+ * - In the case of spin orbit a contribution from relativistic small components is calculated in the same way
+ *
+ * \f[
+ *      \eta^{\alpha}(\bf r ) \rightarrow \eta^{\alpha}_{lm}(r) = \sum_{ij} \rho^{\alpha}_{ij} Gaunt(l_i, l, l_j\ |\ m_i, m, m_j) \chi_{l_i}(r) \chi_{l_j}(r)
+ * \f]
+ *
+ * Also, in the case of spin orbit and non-collinearity (not they are alway together) we need to compute another
+ * contribution to magnetization from small component in \f$\theta-\phi\f$ representation
+ * (which is non-zero in the non-collinear magnetization, while spin-orbit can excist in the collinear case in theory)
+ *
+ *  Therefore, write total expression for AE density with spin orbit
+ * \f[
+ *      n_{tot}^{a}(\bf{r} ) = n^{a}(\bf{r} ) + \eta^{a}(\bf r ) - 2 \bf r_a \sum_{b}  \bf r_b \eta^{b}(\bf r) \\
+ *      n_{tot}^{0}(\bf{r} ) = n^{a}(\bf{r} ) + \eta^{a}(\bf r )
+ * \f]
+ *
+ * \f$a,b=1,2,3\ or\ x,y,z\f$
+ */
 inline void Density::generate_paw_atom_density(paw_density_data_t& pdd)
 {
     int ia = pdd.ia;

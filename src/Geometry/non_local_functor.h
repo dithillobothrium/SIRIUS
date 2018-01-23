@@ -16,7 +16,28 @@
 #include "../density.h"
 
 namespace sirius {
-
+/**
+ *      - Performs computation of the non-local part for defined k-point, which is used later in force.hpp and stress.hpp for calculation forces and stress tensor respectively.
+ *
+ *        Computation for each k point (each beta_projector) is performed in non_local_functor.h, here it is summed over different k-points.
+ *      \f$| \beta_i \rangle \f$ and ultrasoft (or PAW) matrices \f$D_{ij},Q_{ij}\f$ (\f$Q_{ij}\f$ is a \f$l,m=0,0\f$ component of \f$Q_{ij}^{lm}(\bf r)\f$ [3]):
+ *
+ *      \f[
+ *          \bf{F}^N_{nonlocal} = -2Re \left [ \sum_{n} f_{nk} \omega_k \sum_{ij}    {C^{N}_{nk,j}}^*   \left(    D^N_{ij} - \epsilon_{nk} Q^N_{ij}   \right)   K^N_{nk,i}    \right ]
+ *      \f]
+ *
+ *      where
+ *
+ *      \f[
+ *          {C^{N}_{nk,j} }^*= \sum_{\bf{G}} \langle \Psi_{nk} | \bf{G} + \bf{k} \rangle       \langle \bf{G} + \bf{k}  |  \beta^{N}_j \rangle
+ *      \f]
+ *
+ *      and
+ *
+ *      \f[
+ *          K^{N}_{nk,j} = \sum_{\bf{G}} \langle \frac{ \partial \beta^{N}_i } { \partial R^N} | \bf{G} + \bf{k} \rangle       \langle \bf{G} + \bf{k}  | \Psi_{nk} \rangle
+ *      \f]
+ */
 template <typename T, int N>
 class Non_local_functor
 {

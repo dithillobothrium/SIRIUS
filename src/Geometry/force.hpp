@@ -42,13 +42,10 @@ using namespace geometry3d;
 /// Compute atomic forces.
 /** The following referenceces were particularly useful in the derivation of the forces components:
  *
- *    [1] Hutter, D. M. A. J. (2012). Ab Initio Molecular Dynamics (pp. 1–580).
- *
- *    [2] Marx, D., & Hutter, J. (2000). Ab initio molecular dynamics: Theory and implementation.
- *
- *    [3] Kresse, G. & Joubert, D. From ultrasoft pseudopotentials to the projector augmented-wave method. Phys. Rev. B 59, 1758–1775 (1999).
- *
- *    [4] Kresse, G, 1993, PhD Thesis
+ *    - [1] Hutter, D. M. A. J. (2012). Ab Initio Molecular Dynamics (pp. 1–580).
+ *    - [2] Marx, D., & Hutter, J. (2000). Ab initio molecular dynamics: Theory and implementation.
+ *    - [3] Kresse, G. & Joubert, D. From ultrasoft pseudopotentials to the projector augmented-wave method. Phys. Rev. B 59, 1758–1775 (1999).
+ *    - [4] Kresse, G, 1993, PhD Thesis
  *
  *    Total force on atom with a nubfer N in the simplest case is a sum of the following contributions
  *
@@ -77,7 +74,8 @@ using namespace geometry3d;
  *          \bf{F}^N_{us} = i \Omega \sum_{ij} \rho_{ij} \sum_{\bf{G}} Q_{ij}( \bf{G} ) \tilde{v}^{*}_{eff}( \bf{G} ) \bf{G} e^{-i \bf{G} \bf{R}^N}
  *      \f]
  *
- *      - Non-local part of the forces comes from non-local part of the hamiltonian with beta-projectors
+ *      - Non-local part of the forces comes from non-local part of the hamiltonian with beta-projectors.
+ *        Computation for each k point (each beta_projector) is performed in non_local_functor.h, here it is summed over different k-points.
  *      \f$| \beta_i \rangle \f$ and ultrasoft (or PAW) matrices \f$D_{ij},Q_{ij}\f$ (\f$Q_{ij}\f$ is a \f$l,m=0,0\f$ component of \f$Q_{ij}^{lm}(\bf r)\f$ [3]):
  *
  *      \f[
