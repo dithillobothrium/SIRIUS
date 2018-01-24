@@ -3,6 +3,13 @@
  *      Author: isivkov
  */
 
+/**
+ * Initializes PAW data
+ * - allocates potential arrays for all-electron (AE) and pseudo (PS) density.
+ * - In the case of spin orbit initializes array for so-called "g-function" which takes into account
+ * contribution from small componet of the relativistic wave function.
+ * - Initializes PAW matrix paw_dij_ (which is a part of pseudopotential non-local operator)
+ */
 inline void Potential::init_PAW()
 {
     paw_potential_data_.clear();
@@ -61,6 +68,11 @@ inline void Potential::init_PAW()
     paw_one_elec_energies_.resize(unit_cell_.num_paw_atoms());
 }
 
+/**
+ * - Calculates PAW potential (AE and PS)
+ * - Calculates PAW Dij matrix
+ * - Calculates PAW energies
+ */
 inline void Potential::generate_PAW_effective_potential(Density const& density)
 {
     PROFILE("sirius::Potential::generate_PAW_effective_potential");
@@ -118,6 +130,13 @@ inline void Potential::generate_PAW_effective_potential(Density const& density)
     paw_total_core_energy_ = energies[3];
 }
 
+/**
+ * Function for calculation of exchange-correlation potential in the non-magnetic case.
+ * Takes density and potential(for output) in lm-components.
+ * Adds core density to l=0 components of the density.
+ * Transforms in \f$\theta,\phi\f$ representation, get xc-potential and transforms back
+ * - Calculates xc-energy
+ */
 inline double Potential::xc_mt_PAW_nonmagnetic(Spheric_function<spectral, double>& full_potential,
                                                Spheric_function<spectral, double> const& full_density,
                                                std::vector<double> const& rho_core)
@@ -217,6 +236,14 @@ inline double Potential::xc_mt_PAW_nonmagnetic(Spheric_function<spectral, double
 //}
 
 
+/**
+ * Function for calculation of exchange-correlation potential in the magnetic case (collinear and non-collinear).
+ * - Takes denstity and potential(for output) in the \f$\theta,\phi\f$ representation, adds core density.
+ * - In the non-collinear case for each \f$\theta,\phi\f$ xc-potential is calculated as if z-axis were directed along magnetization vector.
+ * Therefore in this coordinate system magnetization has only up and down components and collinear function can be applied.
+ * - Afterwards potential is rotated back in the common coordinate system obtaining effective field \f$B_x,B_y,B_z\f$
+ * - Calculates xc-energy
+ */
 inline std::vector<Spheric_function<spatial, double>>
 Potential::xc_mt_PAW_noncollinear(std::vector<Spheric_function<spatial, double>> const& density,
                                   std::vector<double> const& rho_core,
@@ -250,6 +277,9 @@ Potential::xc_mt_PAW_noncollinear(std::vector<Spheric_function<spatial, double>>
         calc_rho_collin(density[1]);
     }
 
+    /*compute absolute value of magnetization for each theta-phi to get up-down components in the local
+     * coordinate system, where z || magnetization. After that we can apply collinear xc calculation function
+     * */
     if (ctx_.num_mag_dims() == 3) {
         /* store magnitude of magnetization before */
         Spheric_function<spatial, double> magn_magnitude(sht_->num_points(), rgrid);
@@ -289,7 +319,10 @@ Potential::xc_mt_PAW_noncollinear(std::vector<Spheric_function<spatial, double>>
         vxc_tp.push_back(0.5 * (vxc_u_tp - vxc_d_tp));
     }
 
-    /* non-collinear case */
+    /* non-collinear case
+     * After we calculate xc potential for each point in local coordinate system for up-down components,
+     * we rotate it in the common coordinate system and get spin non-diagonal components or Bx,By,Bz (not only Bz)
+     * */
     if (ctx_.num_mag_dims() == 3) {
         /* allocate potensial before */
         for (size_t i = 0; i < density.size(); i++){
@@ -325,7 +358,13 @@ Potential::xc_mt_PAW_noncollinear(std::vector<Spheric_function<spatial, double>>
     return std::move(vxc_tp);
 }
 
-
+/**
+ * - Takes full density and full potential(for the output) in lm components
+ * - Calculates Hartree contribution to the PAW effective potential solving poisson eq. and using poisson_vmt()
+ * - Calculates Hartree energy integrating the density with the potential
+ *
+ *
+ */
 inline double Potential::calc_PAW_hartree_potential(Atom& atom,
                                                     Spheric_function<spectral, double> const& full_density,
                                                     Spheric_function<spectral, double>& full_potential)
@@ -334,7 +373,7 @@ inline double Potential::calc_PAW_hartree_potential(Atom& atom,
 
     const Radial_grid<double>& grid = full_density.radial_grid();
 
-    // array passed to poisson solver
+    // array is passing to poisson solver
     Spheric_function<spectral, double> atom_pot_sf(lmsize_rho, grid);
     atom_pot_sf.zero();
 
@@ -369,6 +408,9 @@ inline double Potential::calc_PAW_hartree_potential(Atom& atom,
     return hartree_energy;
 }
 
+/**
+ *
+ */
 inline void Potential::calc_PAW_local_potential(paw_potential_data_t &ppd,
                                                 paw_density_data_t const& pdd)
 {

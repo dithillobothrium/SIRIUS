@@ -104,7 +104,7 @@ inline void Density::init_density_matrix_for_paw()
 }
 
 /**
- * Generates PAW all-electron(AE) and pseudo(PS) density in \f$lm\f$ components using density matrix \f$\rho_{ij}\f$,
+ * Generates PAW all-electron(AE) and pseudo(PS) density for specified atom in \f$lm\f$ components using density matrix \f$\rho_{ij}\f$,
  * Gaunt coefficients and radial AE wave functions \f$\phi_i\f$.
  * The variable \f$\phi_{l_i}(r) \phi_{l_j}(r)\f$ is precalculated and stored during reading from pseudopotential file
  *
@@ -266,6 +266,9 @@ inline void Density::generate_paw_atom_density(paw_density_data_t& pdd)
     }
 }
 
+/**
+ * Generate PAW density for all PAW atoms
+ */
 inline void Density::generate_paw_loc_density()
 {
     if (!unit_cell_.num_paw_atoms()) {

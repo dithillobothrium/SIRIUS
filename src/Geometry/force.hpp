@@ -39,7 +39,7 @@ namespace sirius {
 
 using namespace geometry3d;
 
-/// Compute atomic forces.
+/// Computes atomic forces.
 /** The following referenceces were particularly useful in the derivation of the forces components:
  *
  *    - [1] Hutter, D. M. A. J. (2012). Ab Initio Molecular Dynamics (pp. 1–580).
@@ -47,70 +47,13 @@ using namespace geometry3d;
  *    - [3] Kresse, G. & Joubert, D. From ultrasoft pseudopotentials to the projector augmented-wave method. Phys. Rev. B 59, 1758–1775 (1999).
  *    - [4] Kresse, G, 1993, PhD Thesis
  *
+ *      All the formulas in Atomic Units.
+ *
  *    Total force on atom with a nubfer N in the simplest case is a sum of the following contributions
  *
  *    \f[
  *      \bf{F}^N = \bf{F}^N_{loc} + \bf{F}^N_{nonloc} + \bf{F}^N_{us} + \bf{F}^N_{ewald} + \bf{F}^N_{nlcc}
  *    \f]
- *
- *    All the formulas in Atomic Units.
- *
- *    - First, \f$\bf{F}^N_{loc}\f$ is the contribution from local potential \f$v_{loc}(r)\f$, which includes core electrons and a nucleus:
- *
- *    \f[
- *          \bf{F}^N_{loc} = i \Omega \sum_{\bf{G}} \rho( \bf{G} ) v^{*}_{loc}( \bf{G} ) \bf{G} e^{-i \bf{G} \bf{R}^N}
- *    \f]
- *
- *      - Non-linear core correction comes from the exchange correlation interaction of core electrons:
- *
- *      \f[
- *          \bf{F}^N_{nlcc} = i \Omega \sum_{\bf{G}} \rho_c( \bf{G} ) v^{*}_{xc}( \bf{G} ) \bf{G} e^{-i \bf{G} \bf{R}^N}
- *      \f]
- *
- *      - Ultrasoft contribution (in Sirius notation) comes from ultrasoft charge \f$Q_{ij}(\bf r)\f$
- *      (the difference between all-electron and pseudo wave functions):
- *
- *      \f[
- *          \bf{F}^N_{us} = i \Omega \sum_{ij} \rho_{ij} \sum_{\bf{G}} Q_{ij}( \bf{G} ) \tilde{v}^{*}_{eff}( \bf{G} ) \bf{G} e^{-i \bf{G} \bf{R}^N}
- *      \f]
- *
- *      - Non-local part of the forces comes from non-local part of the hamiltonian with beta-projectors.
- *        Computation for each k point (each beta_projector) is performed in non_local_functor.h, here it is summed over different k-points.
- *      \f$| \beta_i \rangle \f$ and ultrasoft (or PAW) matrices \f$D_{ij},Q_{ij}\f$ (\f$Q_{ij}\f$ is a \f$l,m=0,0\f$ component of \f$Q_{ij}^{lm}(\bf r)\f$ [3]):
- *
- *      \f[
- *          \bf{F}^N_{nonlocal} = -2Re \left [ \sum_{nk} f_{nk} \omega_k \sum_{ij}    {C^{N}_{nk,j}}^*   \left(    D^N_{ij} - \epsilon_{nk} Q^N_{ij}   \right)   K^N_{nk,i}    \right ]
- *      \f]
- *
- *      where
- *
- *      \f[
- *          {C^{N}_{nk,j} }^*= \sum_{\bf{G}} \langle \Psi_{nk} | \bf{G} + \bf{k} \rangle       \langle \bf{G} + \bf{k}  |  \beta^{N}_j \rangle
- *      \f]
- *
- *      and
- *
- *      \f[
- *          K^{N}_{nk,j} = \sum_{\bf{G}} \langle \frac{ \partial \beta^{N}_i } { \partial R^N} | \bf{G} + \bf{k} \rangle       \langle \bf{G} + \bf{k}  | \Psi_{nk} \rangle
- *      \f]
- *
- *      - Ion (Ewald, lattice, electrostatic) contribution comes from an interaction of the ions (calculated by the Ewald method):
- *
- *      \f[
- *          \bf{F}^N_{ewald} = \bf{F}^N_{R} + \bf{F}^N_{G}
- *      \f]
- *
- *      where reciprocal lattice part
- *
- *      \f[
- *      \bf{F}^N_{G} =  \frac{ 2 \pi q_N } { \Omega  } \sum_{\bf G} \frac{\bf G}{ G^2 } e^{-\sigma^2 G^2 / 2}  \sin \left [-i \bf G \bf {R}_N \right] \mathcal I  \left[   \sum_{i \neq N} q_i e^{-i \bf G \bf {R}_i } \right]
- *      \f]
- *
- *      and real lattice part is (assume the vector between atoms \f$N\f$ and \f$i\f$ is \f$\bf d_{Ni} = \bf R_N - \bf R_i\f$)
- *
- *      \f[
- *          \bf{F}^N_{R} =  q_N \sum_{i} q_i  \frac{ \bf d_{Ni} } { d_{Ni}^2 }  \left (  \frac{ 1 } { d_{Ni }} erfc \left [ \frac{ d_{Ni} } { \sqrt{2} \sigma } \right ]  + \frac { 2 } { \sqrt{2 \pi} \sigma } \exp \left [  - \frac{ d_{Ni}^2 }{ 2 \sigma^2 } \right ] \right )
- *      \f]
  */
 
 class Force
@@ -133,6 +76,9 @@ class Force
     mdarray<double, 2> us_nl_forces_;
     mdarray<double, 2> scf_corr_forces_;
 
+    /**
+     * Calculate non-local contribution to the forces for each k-point (see also non_local_operator.h)
+     */
     template <typename T>
     void add_k_point_contribution(K_point& kpoint, mdarray<double, 2>& forces)
     {
@@ -163,6 +109,9 @@ class Force
         #endif
     }
 
+    /**
+     * Allocates forcess arrays
+     */
     inline void allocate()
     {
         int na = ctx_.unit_cell().num_atoms();
@@ -176,6 +125,9 @@ class Force
         scf_corr_forces_  = mdarray<double, 2>(3, na);
     }
 
+    /**
+     * Symmetrizes forces if symmetry is used.
+     */
     inline void symmetrize_forces(mdarray<double, 2>& unsym_forces, mdarray<double, 2>& sym_forces)
     {
         if (!ctx_.use_symmetry()) {
@@ -445,6 +397,17 @@ class Force
         sum_forces();
     }
 
+    /**
+     *
+     *    First, \f$\bf{F}^N_{loc}\f$ is the contribution from local potential \f$v_{loc}(r)\f$, which includes core electrons and a nucleus:
+     *
+     *    \f[
+     *          \bf{F}^N_{loc} = i \Omega \sum_{\bf{G}} \rho( \bf{G} ) v^{*}_{loc}( \bf{G} ) \bf{G} e^{-i \bf{G} \bf{R}^N}
+     *    \f]
+     *      where \f$\rho( \bf{G} )\f$ is an electron density in reciprocal space, \f$v^{*}_{loc}( \bf{G} )\f$ - local atomic potential in reciprocal space,
+     *      \f$\bf{R}^N\f$ - atomic coorditane.
+     *
+     */
     inline void calc_local_forces(mdarray<double, 2>& forces)
     {
         PROFILE("sirius::Forces::calc_local_forces");
@@ -496,6 +459,17 @@ class Force
         ctx_.comm().allreduce(&forces(0, 0), static_cast<int>(forces.size()));
     }
 
+/**
+ *       Ultrasoft contribution (in Sirius notation) comes from ultrasoft charge \f$Q_{ij}(\bf r)\f$
+ *      (the difference between all-electron and pseudo wave functions):
+ *
+ *      \f[
+ *          \bf{F}^N_{us} = i \Omega \sum_{ij} \rho_{ij} \sum_{\bf{G}} Q_{ij}( \bf{G} ) \tilde{v}^{*}_{eff}( \bf{G} ) \bf{G} e^{-i \bf{G} \bf{R}^N}
+ *      \f]
+ *
+ *      where
+ *      \f$\tilde{v}_{eff}( \bf{G} )\f$ is a full effective potential in reciprocal space
+ */
     inline void calc_ultrasoft_forces(mdarray<double, 2>& forces)
     {
         PROFILE("sirius::Force::calc_ultrasoft_forces");
@@ -572,6 +546,28 @@ class Force
         ctx_.comm().allreduce(&forces(0, 0), static_cast<int>(forces.size()));
     }
 
+/**
+ *       Non-local part of the forces comes from non-local part of the hamiltonian. Summation of matrices <beta|psi> (dot products of beta-projector and wave function)
+ *       and <d beta/ dR |psi> (the same with a derivative over atomic coordinaties) with matrices \f$D_{ij},Q_{ij}\f$.
+ *       Computation for each k point (each beta_projector) is performed in non_local_functor.h, here the result is summed over different k-points.
+ *      \f$| \beta_i \rangle \f$ and ultrasoft (or PAW)
+ *
+ *      \f[
+ *          \bf{F}^N_{nonlocal} = -2Re \left [ \sum_{nk} f_{nk} \omega_k \sum_{ij}    {C^{N}_{nk,j}}^*   \left(    D^N_{ij} - \epsilon_{nk} Q^N_{ij}   \right)   K^N_{nk,i}    \right ]
+ *      \f]
+ *
+ *      where
+ *
+ *      \f[
+ *          {C^{N}_{nk,j} }^*= \sum_{\bf{G}} \langle \Psi_{nk} | \bf{G} + \bf{k} \rangle       \langle \bf{G} + \bf{k}  |  \beta^{N}_j \rangle
+ *      \f]
+ *
+ *      and
+ *
+ *      \f[
+ *          K^{N}_{nk,j} = \sum_{\bf{G}} \langle \frac{ \partial \beta^{N}_i } { \partial R^N} | \bf{G} + \bf{k} \rangle       \langle \bf{G} + \bf{k}  | \Psi_{nk} \rangle
+ *      \f]
+ */
     inline void calc_nonlocal_forces(mdarray<double, 2>& forces)
     {
         PROFILE("sirius::Force::calc_nonlocal_forces");
@@ -598,6 +594,15 @@ class Force
         symmetrize_forces(unsym_forces, forces);
     }
 
+    /**
+     *       Non-linear core correction comes from the exchange correlation interaction of core electrons:
+     *
+     *      \f[
+     *          \bf{F}^N_{nlcc} = i \Omega \sum_{\bf{G}} \rho_c( \bf{G} ) v^{*}_{xc}( \bf{G} ) \bf{G} e^{-i \bf{G} \bf{R}^N}
+     *      \f]
+     *      where \f$\rho_c( \bf{G} )\f$ core electron density, \f$v_{xc}( \bf{G} )\f$ -exchange-correlation potential.
+     *
+     */
     inline void calc_nlcc_forces(mdarray<double, 2>& forces)
     {
         PROFILE("sirius::Force::calc_nlcc_force");
@@ -651,6 +656,27 @@ class Force
         ctx_.comm().allreduce(&forces(0, 0), static_cast<int>(forces.size()));
     }
 
+/**
+ *       Ion (Ewald, lattice, electrostatic) contribution comes from an interaction of the ions (calculated by the Ewald method):
+ *
+ *      \f[
+ *          \bf{F}^N_{ewald} = \bf{F}^N_{R} + \bf{F}^N_{G}
+ *      \f]
+ *
+ *      where reciprocal lattice part
+ *
+ *      \f[
+ *      \bf{F}^N_{G} =  \frac{ 2 \pi q_N } { \Omega  } \sum_{\bf G} \frac{\bf G}{ G^2 } e^{-\sigma^2 G^2 / 2}  \sin \left [-i \bf G \bf {R}_N \right] \mathcal I  \left[   \sum_{i \neq N} q_i e^{-i \bf G \bf {R}_i } \right]
+ *      \f]
+ *
+ *      and real lattice part is (assume the vector between atoms \f$N\f$ and \f$i\f$ is \f$\bf d_{Ni} = \bf R_N - \bf R_i\f$)
+ *
+ *      \f[
+ *          \bf{F}^N_{R} =  q_N \sum_{i} q_i  \frac{ \bf d_{Ni} } { d_{Ni}^2 }  \left (  \frac{ 1 } { d_{Ni }} erfc \left [ \frac{ d_{Ni} } { \sqrt{2} \sigma } \right ]  + \frac { 2 } { \sqrt{2 \pi} \sigma } \exp \left [  - \frac{ d_{Ni}^2 }{ 2 \sigma^2 } \right ] \right )
+ *      \f]
+ *
+ *      here \f$\sigma\f$ is effective decay radius, which has is determined empirically.
+ */
     inline void calc_ewald_forces(mdarray<double, 2>& forces)
     {
         PROFILE("sirius::Force::calc_ewald_forces");
@@ -775,6 +801,9 @@ class Force
         ctx_.comm().allreduce(&forces(0, 0), static_cast<int>(forces.size()));
     }
 
+    /**
+     * Computes all contributions
+     */
     inline void calc_forces_contributions()
     {
         calc_local_forces(local_forces_);
@@ -785,46 +814,73 @@ class Force
         calc_scf_corr_forces(scf_corr_forces_);
     }
 
+    /**
+     *  Get scf correction forces
+     */
     inline mdarray<double, 2> const& scf_corr_forces() const
     {
         return scf_corr_forces_;
     }
 
+    /**
+    *   Get local forces
+    */
     inline mdarray<double, 2> const& local_forces()
     {
         return local_forces_;
     }
 
+    /**
+    *   Get ultrasoft forces
+    */
     inline mdarray<double, 2> const& ultrasoft_forces()
     {
         return ultrasoft_forces_;
     }
 
+    /**
+     *  Get non-local forces
+     */
     inline mdarray<double, 2> const& nonlocal_forces()
     {
         return nonlocal_forces_;
     }
 
+    /**
+     *  Get non-local core correction forces
+     */
     inline mdarray<double, 2> const& nlcc_forces()
     {
         return nlcc_forces_;
     }
 
+    /**
+     *  Get ewald forces
+     */
     inline mdarray<double, 2> const& ewald_forces()
     {
         return ewald_forces_;
     }
 
+    /**
+     *  Get total forces
+     */
     inline mdarray<double, 2> const& total_forces()
     {
         return total_forces_;
     }
 
+    /**
+     *  Get non-local+ultrasoft forces (for compatibility with QE)
+     */
     inline mdarray<double, 2> const& us_nl_forces()
     {
         return us_nl_forces_;
     }
 
+    /**
+     *  Sums all contributions to total forces and symmetrizes forces
+     */
     inline void sum_forces()
     {
         mdarray<double, 2> total_forces_unsym(3, ctx_.unit_cell().num_atoms());
@@ -839,6 +895,9 @@ class Force
         symmetrize_forces(total_forces_unsym, total_forces_);
     }
 
+    /**
+     *  prints forces
+     */
     inline void print_info()
     {
         PROFILE("sirius::DFT_ground_state::forces");
