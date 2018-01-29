@@ -122,7 +122,9 @@ inline void Density::init_density_matrix_for_paw()
  *      \tilde{n}^{\alpha}(\bf r ) + \hat{n}^{\alpha}(\bf r)  \rightarrow \tilde{n}^{\alpha}_{lm}(r) = \sum_{ij} \rho^{\alpha}_{ij} Gaunt(l_i, l, l_j\ |\ m_i, m, m_j)  ( \tilde\phi_{l_i}(r) \tilde\phi_{l_j}(r)  + Q^l_{l_i,l_j}(r) )
  * \f]
  *
- * - Densities are converted from \f$lm\f$ representation to \f$\theta-\phi\f$ representation to use later for XC potential calculation
+ *  here \f$Q^{lm}_{l_i,l_j}(r)\f$ is a compensation charge in lm components.
+ *
+ * - Densities are converted from \f$lm\f$ representation to \f$\theta,\phi\f$ representation to use later for XC potential calculation
  *
  * - In the case of spin orbit a contribution from relativistic small components is calculated in the same way
  *

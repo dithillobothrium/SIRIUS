@@ -243,6 +243,12 @@ inline double Potential::xc_mt_PAW_nonmagnetic(Spheric_function<spectral, double
  * Therefore in this coordinate system magnetization has only up and down components and collinear function can be applied.
  * - Afterwards potential is rotated back in the common coordinate system obtaining effective field \f$B_x,B_y,B_z\f$
  * - Calculates xc-energy
+ *
+ * The energy is calculated as an integral between one-electron energy and total density
+ * (or inner product between vectors of density and one-electron energy)
+ * \f[
+ *      E_{xc} = \int  v_{xc}(\bf r) \rho(\bf r)  d \bf r
+ * \f]
  */
 inline std::vector<Spheric_function<spatial, double>>
 Potential::xc_mt_PAW_noncollinear(std::vector<Spheric_function<spatial, double>> const& density,
@@ -363,7 +369,10 @@ Potential::xc_mt_PAW_noncollinear(std::vector<Spheric_function<spatial, double>>
  * - Calculates Hartree contribution to the PAW effective potential solving poisson eq. and using poisson_vmt()
  * - Calculates Hartree energy integrating the density with the potential
  *
- *
+ *  Th energy is calculated as an integral between Hartree potential and density in lm components
+ *  \f[
+ *      E_H = \frac{1}{2} \sum_{lm} \int v_H^{lm}(r) \rho_{lm}(r) r^2 dr
+ *  \f]
  */
 inline double Potential::calc_PAW_hartree_potential(Atom& atom,
                                                     Spheric_function<spectral, double> const& full_density,
@@ -409,7 +418,7 @@ inline double Potential::calc_PAW_hartree_potential(Atom& atom,
 }
 
 /**
- *
+ * calls function for potential calculation (Hartree and XC) for AE and PS densities
  */
 inline void Potential::calc_PAW_local_potential(paw_potential_data_t &ppd,
                                                 paw_density_data_t const& pdd)
@@ -470,7 +479,19 @@ inline void Potential::calc_PAW_local_potential(paw_potential_data_t &ppd,
     ppd.xc_energy_ = ae_xc_energy - ps_xc_energy;
 }
 
-
+/**
+ * Calculates G-function - the term which appears in the case of spin-orbit calculation and comes from small component
+ * of AE wave functions.
+ *
+ * - Takes 4-component full potential (1,2,3 or Bx, By, Bz components are used)
+ * in \f$\theta,\phi\f$ representation
+ * - Returns 3-component G-function in lm components
+ *
+ *
+ * \f[
+ *      G_i(\bf r) = 2 r_i \sum_{j=x,y,z} r_j v_j(\bf r)
+ * \f]
+ */
 std::array<Spheric_function<spectral, double>, 3> Potential::calc_g_function(std::vector<Spheric_function<spatial, double>> const& ae_potential_tp)
 {
     if (ae_potential_tp.size() != 4) {
@@ -491,7 +512,7 @@ std::array<Spheric_function<spectral, double>, 3> Potential::calc_g_function(std
             /* over radial part */
             for (int x: {0,1,2}) {
                 for (int irad = 0; irad < (int)rgrid.num_points(); irad++) {
-                    g_func_comp(itp, irad) = - 2.0 * ae_potential_tp[x+1](itp, irad) * coord[x] * coord[imagn];
+                    g_func_comp(itp, irad) = 2.0 * ae_potential_tp[x+1](itp, irad) * coord[x] * coord[imagn];
                 }
             }
         }
@@ -502,6 +523,23 @@ std::array<Spheric_function<spectral, double>, 3> Potential::calc_g_function(std
 }
 
 
+/**
+ * Calculates PAW Dij matrix using AE, PS wave functions and potentials (and G-function in the case of spin-orbit).
+ * The PAW matrix Dij itself is a difference between AE and PS versions of Dij matrices.
+ * Formula the same for each magnetic component of a potential
+ *
+ * \f[
+ *      D_{ij} = \sum_{lm} Gaunt(l_i, l, l_j\ |\ m_i, m, m_j)  \int_{\Omega_r}   \left \{ v_{lm}(r) \phi_{l_i}(r) \phi_{l_j}(r) - \tilde{v}_{lm}(r) \left ( \tilde\phi_{l_i}(r) \tilde\phi_{l_j}(r) + Q^{lm}_{l_i,l_j}(r) \right ) \right \}
+ * \f]
+ *
+ * here \f$Q^{lm}_{l_i,l_j}(r)\f$ is a compensation charge in lm components.
+ *
+ * In the case of spi-orbit we need to add G-function-based terms to the i=1,2,3 or x,y,z components of the matrix:
+ *
+ * \f[
+ *      D^{i}_{ij} += \sum_{lm} Gaunt(l_i, l, l_j\ |\ m_i, m, m_j)  \int_{\Omega_r}    G^i_{lm}(r) \phi_{l_i}(r) \phi_{l_j}(r)
+ * \f]
+ */
 inline void Potential::calc_PAW_local_Dij(paw_potential_data_t &ppd, mdarray<double,4>& paw_dij)
 {
     int paw_ind = ppd.ia_paw;
@@ -544,10 +582,10 @@ inline void Potential::calc_PAW_local_Dij(paw_potential_data_t &ppd, mdarray<dou
                     intdata[irad] = ae_atom_pot(lm3, irad) * ae_part - ps_atom_pot(lm3, irad) * ps_part;
                 }
 
-                /* in case of spin-orbit we need to add small correction to magnetic field if we have non-collinear case*/
+                /* in case of spin-orbit we need to add small correction to magnetic field if we have non-collinear calculation*/
                 if (ppd.atom_->type().pp_desc().spin_orbit_coupling && ctx_.num_mag_dims() == 3 && imagn > 0) {
                     for (int irad = 0; irad < newgrid.num_points(); irad++) {
-                        intdata[irad] -= ppd.g_function_[imagn - 1](lm3, irad) * pp_desc.all_elec_rel_small_wfc_matrix(irad, iqij);
+                        intdata[irad] += ppd.g_function_[imagn - 1](lm3, irad) * pp_desc.all_elec_rel_small_wfc_matrix(irad, iqij);
                     }
                 }
 
