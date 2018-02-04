@@ -41,12 +41,12 @@ inline void Potential::init_PAW()
             ppd.ae_potential_.push_back(Spheric_function<spectral, double>(lm_max_rho, ppd.atom_->radial_grid()));
             ppd.ps_potential_.push_back(Spheric_function<spectral, double>(lm_max_rho, ppd.atom_->radial_grid()));
 
-            if (atom_type.pp_desc().spin_orbit_coupling && i > 0) {
+            if (atom_type.spin_orbit_coupling() && i > 0) {
                 ppd.g_function_[i-1] = Spheric_function<spectral, double>(lm_max_rho, ppd.atom_->radial_grid());
             }
         }
 
-        ppd.core_energy_ = atom_type.pp_desc().core_energy;
+        ppd.core_energy_ = atom_type.paw_core_energy();
 
         paw_potential_data_.push_back(std::move(ppd));
     }
@@ -423,8 +423,6 @@ inline double Potential::calc_PAW_hartree_potential(Atom& atom,
 inline void Potential::calc_PAW_local_potential(paw_potential_data_t &ppd,
                                                 paw_density_data_t const& pdd)
 {
-    auto& pp_desc = ppd.atom_->type().pp_desc();
-
     /* Calculation of Hartree potential */
     for (int i = 0; i < ctx_.num_mag_dims() + 1; i++) {
         ppd.ae_potential_[i].zero();
@@ -445,18 +443,21 @@ inline void Potential::calc_PAW_local_potential(paw_potential_data_t &ppd,
     double ae_xc_energy = 0.0;
     double ps_xc_energy = 0.0;
 
+    auto& ae_core = ppd.atom_->type().paw_ae_core_charge_density();
+    auto& ps_core = ppd.atom_->type().ps_core_charge_density();
+
     switch (ctx_.num_mag_dims()){
         case 0:{
-            ae_xc_energy = xc_mt_PAW_nonmagnetic(ppd.ae_potential_[0], pdd.ae_density_[0], pp_desc.all_elec_core_charge);
-            ps_xc_energy = xc_mt_PAW_nonmagnetic(ppd.ps_potential_[0], pdd.ps_density_[0], pp_desc.core_charge_density);
+            ae_xc_energy = xc_mt_PAW_nonmagnetic(ppd.ae_potential_[0], pdd.ae_density_[0], ae_core);
+            ps_xc_energy = xc_mt_PAW_nonmagnetic(ppd.ps_potential_[0], pdd.ps_density_[0], ps_core);
         }break;
 
         case 1:
         case 3:{
             /* receive potential in theta phi
              * waiting for C++17 to rewrite this in better way */
-            auto ae_potential_tp = xc_mt_PAW_noncollinear(pdd.ae_density_tp_, pp_desc.all_elec_core_charge, ae_xc_energy);
-            auto ps_potential_tp = xc_mt_PAW_noncollinear(pdd.ps_density_tp_, pp_desc.core_charge_density,  ps_xc_energy);
+            auto ae_potential_tp = xc_mt_PAW_noncollinear(pdd.ae_density_tp_, ae_core, ae_xc_energy);
+            auto ps_potential_tp = xc_mt_PAW_noncollinear(pdd.ps_density_tp_, ps_core, ps_xc_energy);
 
             /* convert to lm */
             for (int i = 0; i < ctx_.num_mag_dims() + 1; i++) {
@@ -465,19 +466,20 @@ inline void Potential::calc_PAW_local_potential(paw_potential_data_t &ppd,
             }
 
             /* utilise AE potential in theta phi to compute G function from PRB 82, 075116 2010 */
-            if (ppd.atom_->type().pp_desc().spin_orbit_coupling && ctx_.num_mag_dims() == 3) {
+            if (ppd.atom_->type().spin_orbit_coupling() && ctx_.num_mag_dims() == 3) {
                 ppd.g_function_ = calc_g_function(ae_potential_tp);
             }
         }break;
 
         default:{
             TERMINATE("PAW local potential error! Wrong number of spins!")
-        }break;
+        }
     }
 
     /* save xc energy in pdd structure */
     ppd.xc_energy_ = ae_xc_energy - ps_xc_energy;
 }
+
 
 /**
  * Calculates G-function - the term which appears in the case of spin-orbit calculation and comes from small component
@@ -546,7 +548,11 @@ inline void Potential::calc_PAW_local_Dij(paw_potential_data_t &ppd, mdarray<dou
 
     auto& atom_type = ppd.atom_->type();
 
-    auto& pp_desc = atom_type.pp_desc();
+    auto& paw_ae_wfs_mtrx = atom_type.paw_ae_wfs_matrix();
+    auto& paw_ps_wfs_mtrx = atom_type.paw_ps_wfs_matrix();
+
+    /* used in the case of spin-orbit calculation*/
+    auto& paw_ae_rel_small_wfs_matrix = atom_type.paw_ae_rel_small_wfs_matrix();
 
     /* get lm size for density */
     int lmax = atom_type.indexr().lmax_lo();
@@ -556,14 +562,14 @@ inline void Potential::calc_PAW_local_Dij(paw_potential_data_t &ppd, mdarray<dou
 
     Gaunt_coefficients<double> GC(lmax, 2 * lmax, lmax, SHT::gaunt_rlm);
 
-    int nrb = pp_desc.num_beta_radial_functions;
+    int nrb = atom_type.num_beta_radial_functions();
 
     /* store integrals here */
     mdarray<double, 3> integrals(lmsize_rho, nrb * (nrb + 1) / 2, ctx_.num_mag_dims() + 1);
 
     /* shorter paw radial grid*/
     // TODO use shorter paw grid everywhere
-    Radial_grid<double> newgrid = atom_type.radial_grid().segment(pp_desc.cutoff_radius_index);
+    Radial_grid<double> newgrid = atom_type.radial_grid().segment(atom_type.cutoff_radius_index());
 
     /* create array for integration */
     std::vector<double> intdata(newgrid.num_points(),0);
@@ -573,31 +579,36 @@ inline void Potential::calc_PAW_local_Dij(paw_potential_data_t &ppd, mdarray<dou
         auto &ae_atom_pot = ppd.ae_potential_[imagn];
         auto &ps_atom_pot = ppd.ps_potential_[imagn];
 
-        for (int iqij = 0; iqij < nrb * (nrb + 1) / 2 ; iqij++) {
-            for (int lm3 = 0; lm3 < lmsize_rho; lm3++) {
-                /* fill array for integration */
-                for (int irad = 0; irad < newgrid.num_points(); irad++) {
-                    double ae_part = pp_desc.all_elec_wfc_matrix(irad, iqij);
-                    double ps_part = pp_desc.pseudo_wfc_matrix(irad, iqij)  + pp_desc.q_radial_functions_l(irad,iqij, l_by_lm[lm3]);
-                    intdata[irad] = ae_atom_pot(lm3, irad) * ae_part - ps_atom_pot(lm3, irad) * ps_part;
-                }
+        for (int irb2 = 0; irb2 < atom_type.num_beta_radial_functions(); irb2++){
+            for (int irb1 = 0; irb1 <= irb2; irb1++){
+                int iqij = (irb2 * (irb2 + 1)) / 2 + irb1;
 
-                /* in case of spin-orbit we need to add small correction to magnetic field if we have non-collinear calculation*/
-                if (ppd.atom_->type().pp_desc().spin_orbit_coupling && ctx_.num_mag_dims() == 3 && imagn > 0) {
+                for (int lm3 = 0; lm3 < lmsize_rho; lm3++) {
+                    auto& q_rad_func = atom_type.q_radial_function(irb1, irb2, l_by_lm[lm3]);
+
+                    /* fill array for integration */
                     for (int irad = 0; irad < newgrid.num_points(); irad++) {
-                        intdata[irad] += ppd.g_function_[imagn - 1](lm3, irad) * pp_desc.all_elec_rel_small_wfc_matrix(irad, iqij);
+                        intdata[irad] = ae_atom_pot(lm3, irad) * paw_ae_wfs_mtrx(irad, iqij) -
+                                ps_atom_pot(lm3, irad) * (paw_ps_wfs_mtrx(irad, iqij) + q_rad_func[irad]);
                     }
-                }
+
+                    /* in case of spin-orbit we need to add small correction to magnetic field if we have non-collinear calculation*/
+                    if (atom_type.spin_orbit_coupling() && ctx_.num_mag_dims() == 3 && imagn > 0) {
+                        for (int irad = 0; irad < newgrid.num_points(); irad++) {
+                            intdata[irad] += ppd.g_function_[imagn - 1](lm3, irad) * paw_ae_rel_small_wfs_matrix(irad, iqij);
+                        }
+                    }
 
                 /* create spline from data arrays */
                 Spline<double> dij_spl(newgrid,intdata);
 
                 /* integrate */
                 integrals(lm3, iqij, imagn) = dij_spl.integrate(0);
+
+                }
             }
         }
     }
-
 
     //---- calc Dij ----
     for (int ib2 = 0; ib2 < atom_type.mt_lo_basis_size(); ib2++) {

@@ -84,6 +84,7 @@ struct local_orbital_descriptor
     radial_solution_descriptor_set rsd_set;
 };
 
+<<<<<<< HEAD
 /// Descriptor of the pseudopotential.
 struct pseudopotential_descriptor
 {
@@ -173,6 +174,21 @@ struct pseudopotential_descriptor
 
     int cutoff_radius_index;
 };
+=======
+///// Descriptor of the pseudopotential.
+//struct pseudopotential_descriptor
+//{
+//    /// Occubations of atomic states.
+//    /** Length of vector is the same as the number of beta projectors and all_elec_wfc and pseudo_wfc */
+//    //std::vector<double> occupations;
+//
+//    /// total angular momentum j of the (hubbard) wave functions
+//    //std::vector<double> total_angular_momentum_wfs;
+//
+//    /// total angular momentum j of the (hubbard) wave functions
+//    //std::vector<double> occupation_wfs;
+//};
+>>>>>>> 580b2e9add9893404b4a8e116864a8d26bad880b
 
 /// Descriptor of an atom in a list of nearest neigbours for each atom.
 /** See sirius::Unit_cell::find_nearest_neighbours() for the details of usage. */
@@ -186,95 +202,6 @@ struct nearest_neighbour_descriptor
 
     /// Distance from the central atom.
     double distance;
-};
-
-/// Descriptor for the atomic radial functions.
-/** The radial functions \f$ f_{\ell \nu}(r) \f$ are labeled by two indices: orbital quantum number \f$ \ell \f$ and
- *  an order \f$ \nu \f$ for a given $\f \ell \f$.
- */
-struct radial_function_index_descriptor
-{
-    /// Orbital quantum number \f$ \ell \f$.
-    int l;
-
-    /// Total angular momentum
-    double j;
-
-    /// Order of a function for a given \f$ \ell \f$.
-    int order;
-
-    /// If this is a local orbital radial function, idxlo is it's index in the list of local orbital descriptors.
-    int idxlo;
-
-    /// Constructor.
-    radial_function_index_descriptor(int l, int order, int idxlo = -1)
-        : l(l)
-        , order(order)
-        , idxlo(idxlo)
-    {
-        assert(l >= 0);
-        assert(order >= 0);
-    }
-
-    radial_function_index_descriptor(int l, double j, int order, int idxlo = -1)
-        : l(l)
-        , j(j)
-        , order(order)
-        , idxlo(idxlo)
-    {
-        assert(l >= 0);
-        assert(order >= 0);
-    }
-};
-
-struct basis_function_index_descriptor
-{
-    /// angular momentum
-    int l;
-    /// projection of the angular momentum
-    int m;
-    /// composite index
-    int lm;
-    /// total angular momemtum
-    double j;
-    /// order of the radial function for a given l (j)
-    int order;
-    /// indice of local orbital
-    int idxlo;
-    /// index of the radial function or beta projector in the case of
-    /// pseudo potential
-    int idxrf;
-
-    basis_function_index_descriptor(int l, int m, int order, int idxlo, int idxrf)
-        : l(l)
-        , m(m)
-        , order(order)
-        , idxlo(idxlo)
-        , idxrf(idxrf)
-    {
-        assert(l >= 0);
-        assert(m >= -l && m <= l);
-        assert(order >= 0);
-        assert(idxrf >= 0);
-
-        lm = Utils::lm_by_l_m(l, m);
-    }
-
-    basis_function_index_descriptor(int l, int m, double j, int order, int idxlo, int idxrf)
-        : l(l)
-        , m(m)
-        , j(j)
-        , order(order)
-        , idxlo(idxlo)
-        , idxrf(idxrf)
-    {
-        assert(l >= 0);
-        assert(m >= -l && m <= l);
-        assert(order >= 0);
-        assert(idxrf >= 0);
-
-        lm = Utils::lm_by_l_m(l, m);
-    }
 };
 
 struct unit_cell_parameters_descriptor
