@@ -84,97 +84,7 @@ struct local_orbital_descriptor
     radial_solution_descriptor_set rsd_set;
 };
 
-<<<<<<< HEAD
-/// Descriptor of the pseudopotential.
-struct pseudopotential_descriptor
-{
-    /// The pseudo potential includes spin orbit coupling
-    bool spin_orbit_coupling{false};
 
-    /// True if the pseudopotential is soft and charge augmentation is required.
-    bool augment{false};
-
-    /// True if the pseudopotential is used for PAW.
-    bool is_paw{false};
-
-    /// Local part of potential.
-    std::vector<double> vloc;
-
-    /// Maximum angular momentum for |beta> projectors.
-    int lmax_beta_;
-
-    /// Number of radial functions for |beta> projectors.
-    int num_beta_radial_functions;
-
-    /// Orbital quantum numbers of each beta radial function.
-    std::vector<int> beta_l;
-
-    /// Total orbital quantum numbers of each beta radial function.
-    std::vector<double> beta_j;
-
-    /// Number of radial grid points for each beta radial function.
-    std::vector<int> num_beta_radial_points;
-
-    /// Radial functions of beta-projectors.
-    mdarray<double, 2> beta_radial_functions;
-
-    /// Radial functions of Q-operator.
-    mdarray<double, 3> q_radial_functions_l;
-
-    std::vector<double> core_charge_density;
-
-    std::vector<double> total_charge_density;
-
-    mdarray<double, 2> d_mtrx_ion;
-
-    /// Atomic wave-functions used to setup the initial subspace.
-    /** This are the chi wave-function in the USPP file. Pairs of [l, chi_l(r)] are stored. */
-    std::vector<std::pair<int, std::vector<double>>> atomic_pseudo_wfs_;
-
-    /// Occupation of starting wave functions
-    // std::vector<double> atomic_pseudo_wfs_occ_;
-
-    /// All electron basis wave functions, have the same dimensionality as uspp.beta_radial_functions.
-    mdarray<double, 2> all_elec_wfc;
-
-    /// stores all electron phi(i) * phi(j)
-    mdarray<double, 2> all_elec_wfc_matrix;
-
-    /// pseudo basis wave functions, have the same dimensionality as uspp.beta_radial_functions
-    mdarray<double, 2> pseudo_wfc;
-
-    /// stores pseudo phi(i) * phi(j)
-    mdarray<double, 2> pseudo_wfc_matrix;
-
-    /// small component of relativistic All electron wave functions, have the same dimensionality as uspp.beta_radial_functions
-    /// needed only if we have spin-orbit
-    mdarray<double, 2> all_elec_rel_small_wfc;
-
-    /// stores relativistic small phi(i) * phi(j)
-    mdarray<double, 2> all_elec_rel_small_wfc_matrix;
-
-    /// Core energy of PAW.
-    double core_energy; // TODO: proper desciption comment
-
-    /// Occubations of atomic states.
-    /** Length of vector is the same as the number of beta projectors and all_elec_wfc and pseudo_wfc */
-    std::vector<double> occupations;
-
-    /// density of core electron contribution to all electron charge density
-    std::vector<double> all_elec_core_charge;
-
-    /// electrostatic potential of all electron core charge
-    std::vector<double> all_elec_loc_potential;
-
-    /// total angular momentum j of the (hubbard) wave functions
-    std::vector<double> total_angular_momentum_wfs;
-
-    /// total angular momentum j of the (hubbard) wave functions
-    std::vector<double> occupation_wfs;
-
-    int cutoff_radius_index;
-};
-=======
 ///// Descriptor of the pseudopotential.
 //struct pseudopotential_descriptor
 //{
@@ -188,7 +98,6 @@ struct pseudopotential_descriptor
 //    /// total angular momentum j of the (hubbard) wave functions
 //    //std::vector<double> occupation_wfs;
 //};
->>>>>>> 580b2e9add9893404b4a8e116864a8d26bad880b
 
 /// Descriptor of an atom in a list of nearest neigbours for each atom.
 /** See sirius::Unit_cell::find_nearest_neighbours() for the details of usage. */

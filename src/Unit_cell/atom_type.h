@@ -2040,9 +2040,9 @@ inline void Atom_type::read_pseudo_paw(json const& parser)
 
     /* in case of spin orbit create matrix for small component and add it ti all-electron matrix*/
     if (spin_orbit_coupling_) {
-        paw_ae_rel_small_wfs_matrix_ = create_wfc_matrix(paw_ae_rel_small_wfs_);
+        paw_ae_rel_small_wfs_matrix_ = create_wfs_matrix(paw_ae_rel_small_wfs_);
         #pragma omp parallel for
-        for (int i = 0; i < (int)pp_desc_.all_elec_wfc_matrix.size(); i++) {
+        for (int i = 0; i < (int)paw_ae_wfs_matrix_.size(); i++) {
             paw_ae_wfs_matrix_[i] += paw_ae_rel_small_wfs_matrix_[i];
         }
     }
