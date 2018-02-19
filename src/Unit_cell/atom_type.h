@@ -523,7 +523,7 @@ class Atom_type
         return augment_;
     }
 
-    inline int cutoff_radius_index()
+    inline int cutoff_radius_index() const
     {
         return cutoff_radius_index_;
     }

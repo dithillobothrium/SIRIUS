@@ -231,7 +231,7 @@ inline void Density::generate_paw_atom_density(paw_density_data_t& pdd)
                         /* calculate unified density/magnetization
                          * dm_ij * GauntCoef * ( phi_i phi_j  +  Q_ij) */
                         pdd.ae_density_[imagn](lm3coef.lm3, irad) += prefac * paw_ae_wfs_mtrx(irad, iqij);
-                        pdd.ps_density_[imagn](lm3coef.lm3, irad) += prefac * (paw_ps_wfs_mtrx(irad, iqij) + q_rad_func(irad));
+                        pdd.ps_density_[imagn](lm3coef.lm3, irad) += prefac * (paw_ps_wfs_mtrx(irad, iqij) + q_rad_func[irad]);
                     }
                     /* in case of spin-orbit add small component to 4-component density */
                     if (atom_type.spin_orbit_coupling()) {

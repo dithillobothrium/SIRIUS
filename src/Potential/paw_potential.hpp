@@ -571,6 +571,8 @@ inline void Potential::calc_PAW_local_Dij(paw_potential_data_t &ppd, mdarray<dou
     // TODO use shorter paw grid everywhere
     Radial_grid<double> newgrid = atom_type.radial_grid().segment(atom_type.cutoff_radius_index());
 
+    printf("cutoff idx %d\n",atom_type.cutoff_radius_index());
+
     /* create array for integration */
     std::vector<double> intdata(newgrid.num_points(),0);
 
