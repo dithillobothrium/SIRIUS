@@ -90,6 +90,10 @@ void Hamiltonian::apply_h_s(K_point* kp__,
 {
     PROFILE("sirius::Hamiltonian::apply_h_s");
 
+    if ((phi__.num_sc() != hphi__.num_sc()) || (phi__.num_sc() != sphi__.num_sc())) {
+        TERMINATE("wrong number of spin components");
+    }
+
     double t1 = -omp_get_wtime();
 
 /* for the data remapping we need phi on CPU */
@@ -127,7 +131,7 @@ void Hamiltonian::apply_h_s(K_point* kp__,
                 std::stringstream s;
                 s << "phi_" << ispn;
                 print_checksum(s.str(), cs1);
-                s = std::stringstream();
+                s.str("");
                 s << "hphi_" << ispn;
                 print_checksum(s.str(), cs2);
             }
@@ -143,7 +147,7 @@ void Hamiltonian::apply_h_s(K_point* kp__,
         return;
     }
 
-    for (int i = 0; i < ctx_.beta_projector_chunks().num_chunks(); i++) {
+    for (int i = 0; i < kp__->beta_projectors().num_chunks(); i++) {
         /* generate beta-projectors for a block of atoms */
         kp__->beta_projectors().generate(i);
         /* non-collinear case */
@@ -191,7 +195,7 @@ void Hamiltonian::apply_h_s(K_point* kp__,
                 std::stringstream s;
                 s << "hphi_" << ispn;
                 print_checksum(s.str(), cs1);
-                s = std::stringstream();
+                s.str("");
                 s << "sphi_" << ispn;
                 print_checksum(s.str(), cs2);
             }

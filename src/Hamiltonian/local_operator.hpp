@@ -104,6 +104,12 @@ class Local_operator
             }
         }
 
+        static int& num_applied()
+        {
+            static int num_applied_{0};
+            return num_applied_;
+        }
+
         ///// This constructor is used internally in the debug and performance tests only.
         //Local_operator(Simulation_parameters const& param__,
         //               FFT3D&                       fft_coarse__,
@@ -295,7 +301,7 @@ class Local_operator
             }
             for (int ig_loc = 0; ig_loc < ngv_fft; ig_loc++) {
                 /* global index of G-vector */
-                int ig = gkvec_p__.gvec_offset_fft() + ig_loc;
+                int ig = gkvec_p__.idx_gvec(ig_loc);
                 /* get G+k in Cartesian coordinates */
                 auto gv = gkvec_p__.gvec().gkvec_cart(ig);
                 pw_ekin_[ig_loc] = 0.5 * dot(gv, gv);
@@ -353,6 +359,8 @@ class Local_operator
             if (!gkvec_p_) {
                 TERMINATE("Local operator is not prepared");
             }
+
+            num_applied() += n__;
 
             /* remap wave-functions */
             for (int ispn = 0; ispn < phi__.num_sc(); ispn++) {
@@ -755,7 +763,7 @@ class Local_operator
                 for (int x: {0, 1, 2}) {
                     for (int igloc = 0; igloc < gkvec_p_->gvec_count_fft(); igloc++) {
                         /* global index of G-vector */
-                        int ig = gkvec_p_->gvec_offset_fft() + igloc;
+                        int ig = gkvec_p_->idx_gvec(igloc);
                         /* \hat P phi = phi(G+k) * (G+k), \hat P is momentum operator */ 
                         buf_pw[igloc] = phi__.pw_coeffs(0).extra()(igloc, j) * gkvec_p_->gvec().gkvec_cart(ig)[x];
                     }
@@ -781,7 +789,7 @@ class Local_operator
                     /* transform back to PW domain */
                     fft_coarse_.transform<-1>(&buf_pw[0]);
                     for (int igloc = 0; igloc < gkvec_p_->gvec_count_fft(); igloc++) {
-                        int ig = gkvec_p_->gvec_offset_fft() + igloc;
+                        int ig = gkvec_p_->idx_gvec(igloc);
                         hphi__.pw_coeffs(0).extra()(igloc, j) += 0.5 * buf_pw[igloc] * gkvec_p_->gvec().gkvec_cart(ig)[x];
                     }
                 }
@@ -896,6 +904,10 @@ class Local_operator
                      std::vector<Wave_functions>& bphi__)
         {
             PROFILE("sirius::Local_operator::apply_b");
+
+            if (!gkvec_p_) {
+                TERMINATE("Local operator is not prepared");
+            }
 
             fft_coarse_.prepare(*gkvec_p_);
 

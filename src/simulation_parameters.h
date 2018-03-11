@@ -27,7 +27,6 @@
 
 #include "typedefs.h"
 #include "utils.h"
-//#include "sirius_internal.h"
 #include "input.h"
 
 namespace sirius {
@@ -109,11 +108,6 @@ class Simulation_parameters
         parameters_input_.num_mag_dims_ = num_mag_dims__;
     }
 
-    inline void set_num_fv_states(int num_fv_states__)
-    {
-        parameters_input_.num_fv_states_ = num_fv_states__;
-    }
-
     inline void set_aw_cutoff(double aw_cutoff__)
     {
         parameters_input_.aw_cutoff_ = aw_cutoff__;
@@ -138,6 +132,22 @@ class Simulation_parameters
     inline void set_hubbard_correction(bool hubbard_correction__)
     {
         parameters_input_.hubbard_correction_ = hubbard_correction__;
+        hubbard_input_.simplified_hubbard_correction_ = false;
+    }
+
+    inline void set_hubbard_simplified_version()
+    {
+        hubbard_input_.simplified_hubbard_correction_ = true;
+    }
+
+    inline void set_orthogonalize_hubbard_orbitals(const bool test)
+    {
+        hubbard_input_.orthogonalize_hubbard_orbitals_ = true;
+    }
+
+    inline void set_normalize_hubbard_orbitals(const bool test)
+    {
+        hubbard_input_.normalize_hubbard_orbitals_ = true;
     }
 
     inline void set_gamma_point(bool gamma_point__)
@@ -306,6 +316,20 @@ class Simulation_parameters
     {
         return (num_mag_dims() == 3) ? 3 : num_spins();
     }
+    
+    /// Number of spin dimensions of some arrays in case of magnetic calculation.
+    /** Returns 1 for non magnetic calculation, 2 for spin-collinear case and 1 for non colllinear case. */
+    inline int num_spin_dims()
+    {
+        return (num_mag_dims() == 3) ? 1 : num_spins();
+    }
+    
+    /// Set the number of first-variational states.
+    inline int num_fv_states(int num_fv_states__)
+    {
+        parameters_input_.num_fv_states_ = num_fv_states__;
+        return parameters_input_.num_fv_states_;
+    }
 
     /// Number of first-variational states.
     inline int num_fv_states() const
@@ -313,10 +337,25 @@ class Simulation_parameters
         return parameters_input_.num_fv_states_;
     }
 
+    /// Set the number of bands.
+    inline int num_bands(int num_bands__)
+    {
+        parameters_input_.num_bands_ = num_bands__;
+        return parameters_input_.num_bands_;
+    }
+
     /// Total number of bands.
     inline int num_bands() const
     {
-        return num_spins() * num_fv_states();
+        if (num_fv_states() != -1) {
+            if (num_mag_dims() != 3) {
+                return num_fv_states();
+            } else {
+                return num_spins() * num_fv_states();
+            }
+        } else {
+            return parameters_input_.num_bands_;
+        }
     }
 
     inline int max_occupancy() const

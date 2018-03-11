@@ -65,7 +65,7 @@ class Spherical_Bessel_functions
                 double t = rgrid__[ir] * q__;
                 gsl_sf_bessel_jl_array(lmax__ + 1, t, &jl[0]);
                 for (int l = 0; l <= lmax__ + 1; l++) {
-                    sbessel_[l][ir] = jl[l];
+                    sbessel_[l](ir) = jl[l];
                 }
             }
             
@@ -115,12 +115,12 @@ class Spherical_Bessel_functions
             Spline<double> s(*rgrid_);
             if (q_ != 0) {
                 for (int ir = 0; ir < rgrid_->num_points(); ir++) {
-                    s[ir] = (l__ / q_) * sbessel_[l__][ir] - (*rgrid_)[ir] * sbessel_[l__ + 1][ir];
+                    s(ir) = (l__ / q_) * sbessel_[l__](ir) - (*rgrid_)[ir] * sbessel_[l__ + 1](ir);
                 }
             } else {
                 if (l__ == 1) {
                     for (int ir = 0; ir < rgrid_->num_points(); ir++) {
-                        s[ir] = (*rgrid_)[ir] / 3;
+                        s(ir) = (*rgrid_)[ir] / 3;
                     }
                 }
             }
@@ -172,20 +172,15 @@ class sbessel_approx
 
             qnu_ = mdarray<std::vector<double>, 2>(lmax_ + 1, unit_cell_.num_atom_types());
 
-            #pragma omp parallel for
-            for (int l = 0; l <= lmax_; l++)
-            {
-                for (int iat = 0; iat < unit_cell_.num_atom_types(); iat++)
-                {
+            for (int l = 0; l <= lmax_; l++) {
+                for (int iat = 0; iat < unit_cell_.num_atom_types(); iat++) {
                     qnu_(l, iat) = build_approx_freq(qmin__, qmax__, l, unit_cell_.atom_type(iat).mt_radius(), eps__);
                 }
             }
 
             nqnu_max_ = 0;
-            for (int l = 0; l <= lmax_; l++)
-            {
-                for (int iat = 0; iat < unit_cell_.num_atom_types(); iat++)
-                {
+            for (int l = 0; l <= lmax_; l++) {
+                for (int iat = 0; iat < unit_cell_.num_atom_types(); iat++) {
                     nqnu_max_ = std::max(nqnu_max_, static_cast<int>(qnu_(l, iat).size()));
                 }
             }

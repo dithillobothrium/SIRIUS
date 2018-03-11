@@ -54,7 +54,7 @@ class K_point
 
         /// List of G-vectors with |G+k| < cutoff.
         std::unique_ptr<Gvec> gkvec_;
-        
+
         /// G-vector distribution for the FFT transformation.
         std::unique_ptr<Gvec_partition> gkvec_partition_;
 
@@ -66,10 +66,10 @@ class K_point
 
         /// First-variational eigen vectors, distributed in slabs.
         std::unique_ptr<Wave_functions> fv_eigen_vectors_slab_;
-        
+
         /// Lowest eigen-vectors of the LAPW overlap matrix with small aigen-values.
         std::unique_ptr<Wave_functions> singular_components_;
-        
+
         /// Second-variational eigen vectors.
         /** Second-variational eigen-vectors are stored as one or two \f$ N_{fv} \times N_{fv} \f$ matrices in
          *  case of non-magnetic or collinear magnetic case or as a single \f$ 2 N_{fv} \times 2 N_{fv} \f$
@@ -89,11 +89,11 @@ class K_point
         std::unique_ptr<Wave_functions> hubbard_wave_functions_{nullptr};
 
         /// Band occupation numbers.
-        std::vector<double> band_occupancies_;
+        mdarray<double, 2> band_occupancies_;
 
         /// Band energies.
-        std::vector<double> band_energies_;
- 
+        mdarray<double, 2> band_energies_;
+
         /// LAPW matching coefficients for the row G+k vectors.
         /** Used to setup the distributed LAPW Hamiltonian and overlap matrices. */
         std::unique_ptr<Matching_coefficients> alm_coeffs_row_{nullptr};
@@ -171,7 +171,7 @@ class K_point
 
         /// Preconditioner matrix for Chebyshev solver.
         mdarray<double_complex, 3> p_mtrx_;
-        
+
         /// Communicator for parallelization inside k-point.
         /** This communicator is used to split G+k vectors and wave-functions. */
         Communicator const& comm_;
@@ -181,12 +181,36 @@ class K_point
 
         /// Communicator between(!!) columns.
         Communicator const& comm_col_;
-        
+
         /// Generate G+k and local orbital basis sets.
         inline void generate_gklo_basis();
 
         /// Test orthonormalization of first-variational states.
         inline void test_fv_states();
+
+        inline double& band_energy_aux(int j__, int ispn__)
+        {
+            if (ctx_.num_mag_dims() == 3) {
+                return band_energies_(j__, 0);
+            } else {
+                if (!(ispn__ == 0 || ispn__ == 1)) {
+                    TERMINATE("wrong spin index");
+                }
+                return band_energies_(j__, ispn__);
+            }
+        }
+
+        inline double& band_occupancy_aux(int j__, int ispn__)
+        {
+            if (ctx_.num_mag_dims() == 3) {
+                return band_occupancies_(j__, 0);
+            } else {
+                if (!(ispn__ == 0 || ispn__ == 1)) {
+                    TERMINATE("wrong spin index");
+                }
+                return band_occupancies_(j__, ispn__);
+            }
+        }
 
     public:
 
@@ -207,8 +231,10 @@ class K_point
                 vk_[x] = vk__[x];
             }
 
-            band_occupancies_ = std::vector<double>(ctx_.num_bands(), 1);
-            band_energies_    = std::vector<double>(ctx_.num_bands(), 0);
+            band_occupancies_ = mdarray<double, 2>(ctx_.num_bands(), ctx_.num_spin_dims());
+            band_occupancies_.zero();
+            band_energies_ = mdarray<double, 2>(ctx_.num_bands(), ctx_.num_spin_dims());
+            band_energies_.zero();
 
             num_ranks_row_ = comm_row_.size();
             num_ranks_col_ = comm_col_.size();
@@ -270,7 +296,6 @@ class K_point
         /// Generate two-component spinor wave functions
         inline void generate_spinor_wave_functions();
 
-        //Periodic_function<double_complex>* spinor_wave_function_component(int lmax, int ispn, int j);
         inline void generate_atomic_centered_wavefunctions(const int num_ao__, Wave_functions &phi);
 
         void save(int id);
@@ -291,25 +316,11 @@ class K_point
         /// Get the number of occupied bands for each spin channel.
         int num_occupied_bands(int ispn__ = -1)
         {
-            if (ctx_.num_mag_dims() == 3) {
-                for (int j = ctx_.num_bands() - 1; j >= 0; j--) {
-                    if (std::abs(band_occupancy(j) * weight()) > 1e-14) {
-                        return j + 1;
-                    }
+            for (int j = ctx_.num_bands() - 1; j >= 0; j--) {
+                if (std::abs(band_occupancy(j, ispn__) * weight()) > 1e-14) {
+                    return j + 1;
                 }
             }
-
-            if (!(ispn__ == 0 || ispn__ == 1)) {
-                TERMINATE("wrong spin channel");
-            }
-
-            for (int i = ctx_.num_fv_states() - 1; i >= 0; i--) {
-                int j = i + ispn__ * ctx_.num_fv_states();
-                if (std::abs(band_occupancy(j) * weight()) > 1e-14) {
-                    return i + 1;
-                }
-            }
-
             return 0;
         }
 
@@ -349,53 +360,26 @@ class K_point
         //    }
         //}
 
-        inline void get_band_occupancies(double* band_occupancies) const
+        inline double& band_energy(int j__, int ispn__)
         {
-            assert(static_cast<int>(band_occupancies_.size()) == ctx_.num_bands());
-
-            std::memcpy(band_occupancies, &band_occupancies_[0], ctx_.num_bands() * sizeof(double));
+            return band_energy_aux(j__, ispn__);
         }
 
-        inline void set_band_occupancies(double* band_occupancies)
+        inline double band_energy(int j__, int ispn__) const
         {
-            band_occupancies_.resize(ctx_.num_bands());
-            std::memcpy(&band_occupancies_[0], band_occupancies, ctx_.num_bands() * sizeof(double));
+            auto const& e = const_cast<K_point*>(this)->band_energy_aux(j__, ispn__);
+            return e;
         }
 
-        inline void get_band_energies(double* band_energies) const
+        inline double& band_occupancy(int j__, int ispn__)
         {
-            assert(static_cast<int>(band_energies_.size()) == ctx_.num_bands());
-            std::memcpy(band_energies, &band_energies_[0], ctx_.num_bands() * sizeof(double));
+            return band_occupancy_aux(j__, ispn__);
         }
 
-        inline void set_band_energies(double* band_energies)
+        inline double band_occupancy(int j__, int ispn__) const
         {
-            band_energies_.resize(ctx_.num_bands());
-            std::memcpy(&band_energies_[0], band_energies, ctx_.num_bands() * sizeof(double));
-        }
-
-        inline double band_occupancy(int j__) const
-        {
-            assert(j__ >= 0 && j__ < static_cast<int>(band_occupancies_.size()));
-            return band_occupancies_[j__];
-        }
-
-        inline double& band_occupancy(int j__)
-        {
-            assert(j__ >= 0 && j__ < static_cast<int>(band_occupancies_.size()));
-            return band_occupancies_[j__];
-        }
-
-        inline double band_energy(int j__) const
-        {
-            assert(j__ >= 0 && j__ < static_cast<int>(band_energies_.size()));
-            return band_energies_[j__];
-        }
-
-        inline double& band_energy(int j__)
-        {
-            assert(j__ >= 0 && j__ < static_cast<int>(band_energies_.size()));
-            return band_energies_[j__];
+            auto const& e = const_cast<K_point*>(this)->band_occupancy_aux(j__, ispn__);
+            return e;
         }
 
         inline double fv_eigen_value(int i) const

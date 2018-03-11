@@ -72,6 +72,8 @@ class Potential
          */
         std::array<std::unique_ptr<Smooth_periodic_function<double>>, 2> vsigma_;
 
+        /// Used to compute SCF correction to forces.
+        /** This function is set by PW code and is not computed here. */
         std::unique_ptr<Smooth_periodic_function<double>> dveff_;
 
         mdarray<double, 3> sbessel_mom_;
@@ -273,9 +275,13 @@ class Potential
             PROFILE("sirius::Potential::generate_local_potential");
             
             Radial_integrals_vloc<false> ri(ctx_.unit_cell(), ctx_.pw_cutoff(), ctx_.settings().nprii_vloc_);
-            auto v = ctx_.make_periodic_function<index_domain_t::local>([&ri](int iat, double g)
+            auto v = ctx_.make_periodic_function<index_domain_t::local>([&](int iat, double g)
                                                                         {
-                                                                            return ri.value(iat, g);
+                                                                            if (this->ctx_.unit_cell().atom_type(iat).local_potential().empty()) {
+                                                                                return 0.0;
+                                                                            } else {
+                                                                                return ri.value(iat, g);
+                                                                            }
                                                                         });
             std::copy(v.begin(), v.end(), &local_potential_->f_pw_local(0));
             local_potential_->fft_transform(1);
@@ -376,7 +382,13 @@ class Potential
                 local_potential_ = std::unique_ptr<Smooth_periodic_function<double>>(new Smooth_periodic_function<double>(ctx_.fft(), ctx_.gvec_partition()));
                 local_potential_->zero();
 
-                generate_local_potential();
+                bool is_empty{true};
+                for (int iat = 0; iat < unit_cell_.num_atom_types(); iat++) {
+                    is_empty &= unit_cell_.atom_type(iat).local_potential().empty();
+                }
+                if (!is_empty) {
+                    generate_local_potential();
+                }
 
                 dveff_ = std::unique_ptr<Smooth_periodic_function<double>>(new Smooth_periodic_function<double>(ctx_.fft(), ctx_.gvec_partition()));
             }
@@ -527,7 +539,7 @@ class Potential
                     } else {
                         for (int ir = 0; ir < nmtp; ir++) {
                             double r = atom__.radial_grid(ir);
-                            rholm[ir] *= std::pow(r, l + 2);
+                            rholm(ir) *= std::pow(r, l + 2);
                         }
                         qmt[lm] = rholm.interpolate().integrate(g1, 0);
                     }
@@ -540,7 +552,7 @@ class Potential
                             rholm = rho_mt__.component(lm);
                             for (int ir = 0; ir < nmtp; ir++) {
                                 double r = atom__.radial_grid(ir);
-                                rholm[ir] *= std::pow(r, 1 - l);
+                                rholm(ir) *= std::pow(r, 1 - l);
                             }
                             rholm.interpolate().integrate(g2, 0);
                         }
@@ -864,7 +876,7 @@ class Potential
                 effective_magnetic_field_[j]->hdf5_write(storage_file_name, s.str());
             }
             if (ctx_.comm().rank() == 0 && !ctx_.full_potential()) {
-                HDF5_tree fout(storage_file_name, false);
+                HDF5_tree fout(storage_file_name, hdf5_access_t::read_write);
                 for (int j = 0; j < ctx_.unit_cell().num_atoms(); j++) {
                     fout["unit_cell"]["atoms"][j].write("D_operator", ctx_.unit_cell().atom(j).d_mtrx());
                 }
@@ -874,7 +886,7 @@ class Potential
         
         inline void load()
         {
-            HDF5_tree fin(storage_file_name, false);
+            HDF5_tree fin(storage_file_name, hdf5_access_t::read_only);
 
             int ngv;
             fin.read("/parameters/num_gvec", &ngv, 1);
@@ -895,7 +907,7 @@ class Potential
             }
 
             if (!ctx_.full_potential()) {
-                HDF5_tree fout(storage_file_name, false);
+                HDF5_tree fout(storage_file_name, hdf5_access_t::read_only);
                 for (int j = 0; j < ctx_.unit_cell().num_atoms(); j++) {
                     fout["unit_cell"]["atoms"][j].read("D_operator", ctx_.unit_cell().atom(j).d_mtrx());
                 }

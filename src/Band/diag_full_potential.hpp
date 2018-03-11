@@ -384,7 +384,7 @@ inline void Band::get_singular_components(K_point* kp__, Hamiltonian& H__) const
     #endif
 
     if (ctx_.control().verbosity_ >= 2 && kp__->comm().rank() == 0) {
-        printf("lowest and highest eigen-values of the singluar components: %20.16f %20.16f\n", eval.front(), eval.back());
+        printf("lowest and highest eigen-values of the singular components: %20.16f %20.16f\n", eval.front(), eval.back());
     }
 
     kp__->comm().barrier();
@@ -494,7 +494,7 @@ inline void Band::diag_fv_davidson(K_point* kp, Hamiltonian& H__) const
 
     std::vector<double> eval(num_bands);
     for (int i = 0; i < num_bands; i++) {
-        eval[i] = kp->band_energy(i);
+        eval[i] = kp->fv_eigen_value(i);
     }
     std::vector<double> eval_old(num_bands);
 
@@ -616,7 +616,9 @@ inline void Band::diag_sv(K_point*     kp__,
         return;
     }
 
-    std::vector<double> band_energies(ctx_.num_bands());
+    hamiltonian__.local_op().prepare(kp__->gkvec_partition());
+
+    mdarray<double, 2> band_energies(ctx_.num_bands(), ctx_.num_spin_dims());
 
     /* product of the second-variational Hamiltonian and a first-variational wave-function */
     std::vector<Wave_functions> hpsi;
@@ -704,7 +706,7 @@ inline void Band::diag_sv(K_point*     kp__,
             //DUMP("checksum(h): %18.10f %18.10f", std::real(z1), std::imag(z1));
             //#endif
             sddk::timer t1("sirius::Band::diag_sv|stdevp");
-            std_solver->solve(nfv, nfv, h, &band_energies[ispn * nfv], kp__->sv_eigen_vectors(ispn));
+            std_solver->solve(nfv, nfv, h, &band_energies(0, ispn), kp__->sv_eigen_vectors(ispn));
         }
     } else {
         int nb = ctx_.num_bands();
@@ -726,7 +728,11 @@ inline void Band::diag_sv(K_point*     kp__,
                 }
             }
         } else {
+#ifdef __SCALAPACK
             linalg<CPU>::tranc(nfv, nfv, h, 0, nfv, h, nfv, 0);
+#else
+            TERMINATE_NO_SCALAPACK
+#endif
         }
 
         for (int i = 0; i < nfv; i++) {
@@ -738,7 +744,7 @@ inline void Band::diag_sv(K_point*     kp__,
         //DUMP("checksum(h): %18.10f %18.10f", std::real(z1), std::imag(z1));
         //#endif
         sddk::timer t1("sirius::Band::diag_sv|stdevp");
-        std_solver->solve(nb, nb, h, &band_energies[0], kp__->sv_eigen_vectors(0));
+        std_solver->solve(nb, nb, h, &band_energies(0, 0), kp__->sv_eigen_vectors(0));
     }
 
 #ifdef __GPU
@@ -749,6 +755,9 @@ inline void Band::diag_sv(K_point*     kp__,
         }
     }
 #endif
- 
-    kp__->set_band_energies(&band_energies[0]);
+    for (int ispn = 0; ispn < ctx_.num_spin_dims(); ispn++) { 
+        for (int j = 0; j < ctx_.num_bands(); j++) {
+            kp__->band_energy(j, ispn) = band_energies(j, ispn);
+        }
+    }
 }

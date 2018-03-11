@@ -1,12 +1,29 @@
-/*
- * Non_local_functor.h
+// Copyright (c) 2013-2017 Anton Kozhevnikov, Ilia Sivkov, Thomas Schulthess
+// All rights reserved.
+// 
+// Redistribution and use in source and binary forms, with or without modification, are permitted provided that 
+// the following conditions are met:
+// 
+// 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the 
+//    following disclaimer.
+// 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions 
+//    and the following disclaimer in the documentation and/or other materials provided with the distribution.
+// 
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED 
+// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A 
+// PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR 
+// ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, 
+// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER 
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR 
+// OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+/** \file non_local_functor.hpp
  *
- *  Created on: Mar 13, 2017
- *      Author: isivkov
+ *  \brief Common operation for forces and stress tensor.
  */
 
-#ifndef __NON_LOCAL_FUNCTOR_H__
-#define __NON_LOCAL_FUNCTOR_H__
+#ifndef __NON_LOCAL_FUNCTOR_HPP__
+#define __NON_LOCAL_FUNCTOR_HPP__
 
 #include "../simulation_context.h"
 #include "../periodic_function.h"
@@ -51,10 +68,8 @@ class Non_local_functor
                       Beta_projectors_base<N>& bp_base__)
         : ctx_(ctx__)
         , bp_base_(bp_base__)
-    {}
-
-    /// Dimension of the beta-projector array.
-    static const int N_ = N;
+    {
+    }
 
     /// collect summation result in an array
     void add_k_point_contribution(K_point& kpoint__, mdarray<double, 2>& collect_res__)
@@ -63,14 +78,12 @@ class Non_local_functor
 
         Beta_projectors& bp = kpoint__.beta_projectors();
 
-        auto& bp_chunks = bp.beta_projector_chunks();
-
         double main_two_factor = -2.0;
 
         bp_base_.prepare();
         bp.prepare();
 
-        for (int icnk = 0; icnk < bp_chunks.num_chunks(); icnk++) {
+        for (int icnk = 0; icnk < bp_base_.num_chunks(); icnk++) {
             /* generate chunk for inner product of beta */
             bp.generate(icnk);
 
@@ -89,7 +102,6 @@ class Non_local_functor
                 bp_base_.generate(icnk, x);
 
                 for (int ispn = 0; ispn < ctx_.num_spins(); ispn++) {
-                    int spin_bnd_offset = ctx_.num_mag_dims() == 1 ? ispn * ctx_.num_fv_states() : 0 ;
                     int spin_factor = (ispn == 0 ? 1 : -1);
 
                     int nbnd = kpoint__.num_occupied_bands(ispn);
@@ -102,10 +114,10 @@ class Non_local_functor
                     int nbnd_loc = spl_nbnd.local_size();
 
                     #pragma omp parallel for
-                    for (int ia_chunk = 0; ia_chunk < bp_chunks(icnk).num_atoms_; ia_chunk++) {
-                        int ia   = bp_chunks(icnk).desc_(beta_desc_idx::ia, ia_chunk);
-                        int offs = bp_chunks(icnk).desc_(beta_desc_idx::offset, ia_chunk);
-                        int nbf  = bp_chunks(icnk).desc_(beta_desc_idx::nbf, ia_chunk);
+                    for (int ia_chunk = 0; ia_chunk < bp_base_.chunk(icnk).num_atoms_; ia_chunk++) {
+                        int ia   = bp_base_.chunk(icnk).desc_(beta_desc_idx::ia, ia_chunk);
+                        int offs = bp_base_.chunk(icnk).desc_(beta_desc_idx::offset, ia_chunk);
+                        int nbf  = bp_base_.chunk(icnk).desc_(beta_desc_idx::nbf, ia_chunk);
                         int iat  = unit_cell.atom(ia).type_id();
 
                         /* helper lambda to calculate for sum loop over bands for different beta_phi and dij combinations*/
@@ -115,9 +127,9 @@ class Non_local_functor
                             for (int ibnd_loc = 0; ibnd_loc < nbnd_loc; ibnd_loc++) {
                                 int ibnd = spl_nbnd[ibnd_loc];
 
-                                double_complex scalar_part = main_two_factor * kpoint__.band_occupancy(ibnd + spin_bnd_offset) * kpoint__.weight() *
+                                double_complex scalar_part = main_two_factor * kpoint__.band_occupancy(ibnd, ispn) * kpoint__.weight() *
                                         std::conj(beta_phi_chunk(offs + jbf, ibnd)) * bp_base_phi_chunk(offs + ibf, ibnd) *
-                                        (dij - kpoint__.band_energy(ibnd + spin_bnd_offset) * qij);
+                                        (dij - kpoint__.band_energy(ibnd, ispn) * qij);
 
                                 /* get real part and add to the result array*/
                                 collect_res__(x, ia) += scalar_part.real();
@@ -175,4 +187,4 @@ class Non_local_functor
 
 }
 
-#endif /* __NON_LOCAL_FUNCTOR_H__ */
+#endif /* __NON_LOCAL_FUNCTOR_HPP__ */
