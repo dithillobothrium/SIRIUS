@@ -851,6 +851,7 @@ class Potential
             if (!ctx_.full_potential()) {
                 generate_PAW_effective_potential(density__);
                 generate_D_operator_matrix();
+                add_paw_Dij_to_atom_Dmtrx();
             }
         }
 

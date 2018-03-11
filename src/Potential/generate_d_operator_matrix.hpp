@@ -178,7 +178,7 @@ inline void Potential::generate_D_operator_matrix()
         }
 
         // add paw Dij to uspp Dij
-        add_paw_Dij_to_atom_Dmtrx();
+        //add_paw_Dij_to_atom_Dmtrx();
 
         // Now compute the d operator for atoms with so interactions
         if (atom_type.spin_orbit_coupling()) {
