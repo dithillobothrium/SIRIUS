@@ -246,6 +246,7 @@ class Unit_cell
         for (int ia = 0; ia < num_atoms(); ia++) {
             if (atom(ia).type().is_paw()) {
                 paw_atom_index_.push_back(ia);
+                atom(ia).set_paw_idx((int)paw_atom_index_.size() - 1);
             }
         }
 

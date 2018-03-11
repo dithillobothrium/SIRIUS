@@ -96,6 +96,9 @@ class Atom
     /// D-operator matrix for spin orbit coupling. see Ref. PRB 71 115106 eq.19
     mdarray<double_complex, 3> d_mtrx_so_;
 
+    /// index of the atom in the array of paw atoms
+    int paw_idx_{-1};
+
   public:
     /// Constructor.
     Atom(Atom_type const& type__, vector3d<double> position__, vector3d<double> vector_field__)
@@ -356,6 +359,20 @@ class Atom
     inline Atom_symmetry_class const& symmetry_class() const
     {
         return (*symmetry_class_);
+    }
+
+    /// set paw index
+    void set_paw_idx(int idx)
+    {
+        if (type().is_paw()) {
+            paw_idx_ = idx;
+        }
+    }
+
+    /// get paw index
+    int paw_idx() const
+    {
+        return paw_idx_;
     }
 
     /// Return atom type id.
