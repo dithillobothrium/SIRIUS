@@ -5,7 +5,8 @@
       "std_evp_solver_type" : "lapack",
       "gen_evp_solver_type" : "lapack",
       "print_forces" : true,
-      "print_stress" : true
+      "print_stress" : true,
+      "verbosity"    : 1
   },
 
   "parameters" : {
@@ -21,7 +22,7 @@
     "num_mag_dims" : 1,
 
     "gk_cutoff" : 6.0,
-    "pw_cutoff" : 25.00,
+    "pw_cutoff" : 30.00,
 
     "energy_tol" : 1e-8,
 

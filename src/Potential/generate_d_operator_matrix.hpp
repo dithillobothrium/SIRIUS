@@ -185,11 +185,8 @@ inline void Potential::generate_D_operator_matrix()
                         auto& atom = unit_cell_.atom(ia);
 
                         for (int xi2 = 0; xi2 < nbf; xi2++) {
-                            for (int xi1 = 0; xi1 <= xi2; xi1++) {
-                                int idx12 = xi2 * (xi2 + 1) / 2 + xi1;
-                                /* D-matix is symmetric */
+                            for (int xi1 = 0; xi1 < nbf; xi1++) {
                                 atom.d_mtrx(xi1, xi2, iv) += paw_dij_(xi1, xi2, iv, atom.paw_idx());
-                                atom.d_mtrx(xi2, xi1, iv) += paw_dij_(xi2, xi1, iv, atom.paw_idx());
                             }
                         }
                     }

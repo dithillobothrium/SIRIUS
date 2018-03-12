@@ -589,7 +589,7 @@ inline void Potential::calc_PAW_local_Dij(paw_potential_data_t &ppd, mdarray<dou
                     /* fill array for integration */
                     for (int irad = 0; irad < newgrid.num_points(); irad++) {
                         intdata[irad] = ae_atom_pot(lm3, irad) * paw_ae_wfs_mtrx(irad, iqij) -
-                                ps_atom_pot(lm3, irad) * (paw_ps_wfs_mtrx(irad, iqij) + q_rad_func[irad]);
+                                ps_atom_pot(lm3, irad) * (paw_ps_wfs_mtrx(irad, iqij) + q_rad_func(irad));
                     }
 
                     /* in case of spin-orbit we need to add small correction to magnetic field if we have non-collinear calculation*/
