@@ -12,7 +12,7 @@
  /
  &system
     ibrav = 0, nat= 2, ntyp= 1, noncolin = .true. , lspinorb = .true. ,
-    ecutwfc = 36.0, ecutrho = 400.0, nspin = 4,
+    ecutwfc = 25.0, ecutrho = 400.0, nspin = 4,
     starting_magnetization(1) = 1.0, angle1(1) = 0, angle2(1) = 0,
     occupations='smearing', smearing='gaussian', degauss=0.02
  /
@@ -39,5 +39,5 @@ ATOMIC_POSITIONS crystal
  Fe  0.0 0.0 0.0
  Fe  0.5 0.5 0.5
 K_POINTS (automatic)
- 3 3 3 0 0 0
+ 2 2 2 0 0 0
 

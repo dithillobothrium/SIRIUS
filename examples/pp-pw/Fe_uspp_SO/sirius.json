@@ -6,8 +6,8 @@
       "gen_evp_solver_type" : "lapack",
       "print_forces" : true,
       "print_stress" : true,
-      "verbosity" : 2,
-      "verification" : true
+      "verbosity" : 1,
+      "verification" : false
   },
 
   "parameters" : {
@@ -24,6 +24,8 @@
 
     "gk_cutoff" : 8.0,
     "pw_cutoff" : 30.00,
+    
+    "spin_orbit" : true,
 
     "energy_tol" : 1e-8,
 
