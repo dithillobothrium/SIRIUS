@@ -235,7 +235,7 @@ struct Iterative_solver_input
 
     /// Tolerance for the residual L2 norm.
     double residual_tolerance_{1e-6};
-    
+
     /// Additional tolerance for empty states.
     /** Setting this variable to 0 will treat empty states with the same tolerance as occupied states. */
     double empty_states_tolerance_{1e-5};
@@ -370,14 +370,14 @@ struct Control_input
 struct Parameters_input
 {
     /// Electronic structure method.
-    std::string esm_{"none"};
+    std::string electronic_structure_method_{"none"};
 
     std::vector<std::string> xc_functionals_;
     std::string core_relativity_{"dirac"};
     std::string valence_relativity_{"zora"};
-    
+
     /// Number of bands.
-    /** In spin-collinear case this is the number of bands for each spin channel. */ 
+    /** In spin-collinear case this is the number of bands for each spin channel. */
     int num_bands_{-1};
 
     /// Number of first-variational states.
@@ -442,8 +442,10 @@ struct Parameters_input
     void read(json const& parser)
     {
         if (parser.count("parameters")) {
-            esm_ = parser["parameters"].value("electronic_structure_method", esm_);
-            std::transform(esm_.begin(), esm_.end(), esm_.begin(), ::tolower);
+            electronic_structure_method_ = parser["parameters"].value("electronic_structure_method",
+                                                                      electronic_structure_method_);
+            std::transform(electronic_structure_method_.begin(), electronic_structure_method_.end(),
+                           electronic_structure_method_.begin(), ::tolower);
 
             /* read list of XC functionals */
             if (parser["parameters"].count("xc_functionals")) {
@@ -481,7 +483,12 @@ struct Parameters_input
             nn_radius_      = parser["parameters"].value("nn_radius", nn_radius_);
             if (parser["parameters"].count("spin_orbit")) {
                 so_correction_ = parser["parameters"].value("spin_orbit", so_correction_);
-                num_mag_dims_  = 3;
+
+                // check that the so correction is actually needed. the
+                // parameter spin_orbit can still be indicated to false
+                if (so_correction_) {
+                    num_mag_dims_  = 3;
+                }
             }
 
             if (parser["parameters"].count("hubbard_correction")) {

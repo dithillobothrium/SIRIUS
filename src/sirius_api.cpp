@@ -91,19 +91,18 @@ void sirius_finalize(ftn_bool* call_mpi_fin__)
 }
 
 /// Create context of the simulation.
-void sirius_create_simulation_context(ftn_char config_file_name__,
-                                      ftn_char method_type__,
+void sirius_create_simulation_context(ftn_char str__,
                                       ftn_int* fcomm__)
 {
     auto& comm = map_fcomm(*fcomm__);
-    std::string config_file_name(config_file_name__);
-    std::string method_type(method_type__);
-    if (config_file_name.length() == 0) {
-        sim_ctx = std::unique_ptr<sirius::Simulation_context>(new sirius::Simulation_context(comm));
-    } else {
-        sim_ctx = std::unique_ptr<sirius::Simulation_context>(new sirius::Simulation_context(config_file_name, comm));
-    }
-    sim_ctx->set_esm_type(method_type);
+    std::string str(str__);
+    sim_ctx = std::unique_ptr<sirius::Simulation_context>(new sirius::Simulation_context(str, comm));
+}
+
+void sirius_import_simulation_context_parameters(ftn_char str__)
+{
+    std::string str(str__);
+    sim_ctx->import(str);
 }
 
 /// Initialize the global variables.
@@ -790,7 +789,7 @@ void sirius_find_eigen_states(int32_t* kset_id__,
                               int32_t* precompute__)
 {
     bool precompute = (*precompute__) ? true : false;
-    dft_ground_state->band().solve_for_kset(*kset_list[*kset_id__], *hamiltonian, precompute);
+    dft_ground_state->band().solve(*kset_list[*kset_id__], *hamiltonian, precompute);
 }
 
 void sirius_find_band_occupancies(int32_t* kset_id__)
@@ -2745,7 +2744,7 @@ void sirius_get_wave_functions(ftn_int*            kset_id__,
     std::vector<double_complex> wf_tmp(kp->num_gkvec());
     int gkvec_count = kp->gkvec().count();
     int gkvec_offset = kp->gkvec().offset();
-    
+
     // TODO: create G-mapping once here
 
     for (int i = 0; i < sim_ctx->num_bands(); i++) {
@@ -2789,7 +2788,7 @@ void sirius_get_beta_projectors(ftn_int*            kset_id__,
     vkb.zero();
 
     auto& gkvec = kp->gkvec();
-    
+
     /* list of sirius G-vector indices which fall into cutoff |G+k| < Gmax */
     std::vector<int> idxg;
     /* mapping  between QE and sirius indices */
@@ -2819,7 +2818,7 @@ void sirius_get_beta_projectors(ftn_int*            kset_id__,
     for (int ia = 0; ia < sim_ctx->unit_cell().num_atoms(); ia++) {
         auto& atom = sim_ctx->unit_cell().atom(ia);
         int nbf = atom.mt_basis_size();
-        
+
         auto qe_order = atomic_orbital_index_map_QE(atom.type());
 
         for (int xi = 0; xi < nbf; xi++) {
@@ -2973,7 +2972,7 @@ void sirius_get_q_operator(ftn_char            label__,
             xi2 = xi;
         }
     }
-    
+
     auto p1 = phase_Rlm_QE(type, xi1);
     auto p2 = phase_Rlm_QE(type, xi2);
 
@@ -3293,7 +3292,7 @@ void sirius_get_pw_coeffs_real(ftn_char    atom_type__,
 void sirius_calculate_forces(ftn_int* kset_id__)
 {
     auto& kset = *kset_list[*kset_id__];
-    forces = std::unique_ptr<sirius::Force>(new sirius::Force(*sim_ctx, *density, *potential, kset));
+    forces = std::unique_ptr<sirius::Force>(new sirius::Force(*sim_ctx, *density, *potential, *hamiltonian, kset));
 }
 
 void sirius_get_forces(ftn_char label__, ftn_double* forces__)
