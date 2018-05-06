@@ -84,6 +84,15 @@ void sirius_clear(void)
     kset_list.clear();
 }
 
+bool sirius_initialized()
+{
+    if (sim_ctx && sim_ctx->initialized()) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
 /// Finalize the usage of the library.
 void sirius_finalize(ftn_bool* call_mpi_fin__)
 {
@@ -2216,6 +2225,11 @@ void sirius_set_iterative_solver_tolerance(ftn_double* tol__)
     sim_ctx->set_iterative_solver_tolerance(*tol__);
 }
 
+void sirius_set_empty_states_tolerance(ftn_double* tol__)
+{
+    sim_ctx->empty_states_tolerance(*tol__);
+}
+
 void sirius_set_iterative_solver_type(ftn_char type__)
 {
     sim_ctx->set_iterative_solver_type(std::string(type__));
@@ -2722,7 +2736,8 @@ static std::vector<int> atomic_orbital_index_map_QE(sirius::Atom_type const& typ
 
 static inline int phase_Rlm_QE(sirius::Atom_type const& type__, int xi__)
 {
-    return (type__.indexb(xi__).m >= 1 && type__.indexb(xi__).m % 2 == 0) ? -1 : 1;
+    //return (type__.indexb(xi__).m >= 1 && type__.indexb(xi__).m % 2 == 0) ? -1 : 1;
+    return (type__.indexb(xi__).m < 0 && (-type__.indexb(xi__).m) % 2 == 0) ? -1 : 1;
 }
 
 void sirius_get_wave_functions(ftn_int*            kset_id__,
@@ -3045,6 +3060,8 @@ void sirius_set_density_matrix(ftn_int*            ia__,
                                ftn_double_complex* dm__,
                                ftn_int*            ld__)
 {
+    PROFILE("sirius_api::sirius_set_density_matrix");
+
     mdarray<double_complex, 3> dm(dm__, *ld__, *ld__, 3);
     auto& atom = sim_ctx->unit_cell().atom(*ia__ - 1);
     auto idx_map = atomic_orbital_index_map_QE(atom.type());
@@ -3252,6 +3269,8 @@ void sirius_get_pw_coeffs_real(ftn_char    atom_type__,
                                ftn_int*    gvl__,
                                ftn_int*    comm__)
 {
+    PROFILE("sirius_api::sirius_get_pw_coeffs_real");
+
     std::string label(label__);
     std::string atom_label(atom_type__);
     int iat = sim_ctx->unit_cell().atom_type(atom_label).id();
@@ -3286,6 +3305,11 @@ void sirius_get_pw_coeffs_real(ftn_char    atom_type__,
                        {
                            return ri.value(iat, g);
                        });
+    } else {
+        std::stringstream s;
+        s << "wrong label in sirius_get_pw_coeffs_real()" << std::endl
+          << "  label : " << label; 
+        TERMINATE(s);
     }
 }
 
@@ -3402,20 +3426,21 @@ void sirius_set_use_symmetry(ftn_int* flg__)
 
 void sirius_ri_aug_(ftn_int* idx__, ftn_int* l__, ftn_int* iat__, ftn_double* q__, ftn_double* val__)
 {
-    if (sim_ctx) {
-        *val__ = sim_ctx->aug_ri().value<int, int, int>(*idx__ - 1, *l__, *iat__ - 1, *q__);
-    } else {
-        *val__ = 0;
-    }
+    *val__ = sim_ctx->aug_ri().value<int, int, int>(*idx__ - 1, *l__, *iat__ - 1, *q__);
+}
+void sirius_ri_aug_djl_(ftn_int* idx__, ftn_int* l__, ftn_int* iat__, ftn_double* q__, ftn_double* val__)
+{
+    *val__ = sim_ctx->aug_ri_djl().value<int, int, int>(*idx__ - 1, *l__, *iat__ - 1, *q__);
 }
 
 void sirius_ri_beta_(ftn_int* idx__, ftn_int* iat__, ftn_double* q__, ftn_double* val__)
 {
-    if (sim_ctx) {
-        *val__ = sim_ctx->beta_ri().value<int, int>(*idx__ - 1, *iat__ - 1, *q__);
-    } else {
-        *val__ = 0;
-    }
+    *val__ = sim_ctx->beta_ri().value<int, int>(*idx__ - 1, *iat__ - 1, *q__);
+}
+
+void sirius_ri_beta_djl_(ftn_int* idx__, ftn_int* iat__, ftn_double* q__, ftn_double* val__)
+{
+    *val__ = sim_ctx->beta_ri_djl().value<int, int>(*idx__ - 1, *iat__ - 1, *q__);
 }
 
 void sirius_set_esm(ftn_bool* enable_esm__, ftn_char esm_bc__)
@@ -3491,6 +3516,23 @@ void sirius_get_num_beta_projectors(ftn_char label__,
 {
     auto& type = sim_ctx->unit_cell().atom_type(std::string(label__));
     *num_beta_projectors__ = type.mt_basis_size();
+}
+
+void sirius_spline_(ftn_int* n__, ftn_double* x__, ftn_double* f__, ftn_double* cf__)
+{
+    int np = *n__;
+
+    sirius::Radial_grid_ext<double> rgrid(np, x__);
+    sirius::Spline<double> s(rgrid, std::vector<double>(f__, f__ + np));
+
+    mdarray<double, 2> cf(cf__, 3, np);
+
+    for (int i = 0; i < np - 1; i++) {
+        auto c = s.coeffs(i);
+        cf(0, i) = c[1];
+        cf(1, i) = c[2];
+        cf(2, i) = c[3];
+    }
 }
 
 } // extern "C"

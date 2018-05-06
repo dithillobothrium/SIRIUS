@@ -26,7 +26,7 @@
 #ifndef __ATOM_TYPE_H__
 #define __ATOM_TYPE_H__
 
-#include "atomic_conf.h"
+#include "atomic_data.hpp"
 #include "descriptors.h"
 #include "geometry3d.hpp"
 #include "utils.h"
@@ -236,8 +236,9 @@ class Atom_type
     inline void read_pseudo_uspp(json const& parser);
 
     inline void read_pseudo_paw(json const& parser);
-
-    inline void read_input(const std::string& fname);
+    
+    /// Read atomic parameters from json file or string. 
+    inline void read_input(std::string const& str__);
 
     inline void init_aw_descriptors(int lmax)
     {
@@ -314,7 +315,7 @@ class Atom_type
 
     inline void set_radial_grid(radial_grid_t grid_type__, int num_points__, double rmin__, double rmax__)
     {
-        radial_grid_        = Radial_grid_factory<double>(grid_type__, num_points__, rmin__, rmax__);
+        radial_grid_ = Radial_grid_factory<double>(grid_type__, num_points__, rmin__, rmax__);
         if (parameters_.processing_unit() == GPU) {
             radial_grid_.copy_to_device();
         }
@@ -322,7 +323,7 @@ class Atom_type
 
     inline void set_radial_grid(int num_points__, double const* points__)
     {
-        radial_grid_        = Radial_grid_ext<double>(num_points__, points__);
+        radial_grid_ = Radial_grid_ext<double>(num_points__, points__);
         if (parameters_.processing_unit() == GPU) {
             radial_grid_.copy_to_device();
         }
@@ -331,7 +332,7 @@ class Atom_type
     /// Add augmented-wave descriptor.
     inline void add_aw_descriptor(int n, int l, double enu, int dme, int auto_enu)
     {
-        if ((int)aw_descriptors_.size() < (l + 1)) {
+        if (static_cast<int>(aw_descriptors_.size()) < (l + 1)) {
             aw_descriptors_.resize(l + 1, radial_solution_descriptor_set());
         }
 
@@ -1448,15 +1449,7 @@ inline void Atom_type::init(int offset_lo__)
     offset_lo_ = offset_lo__;
 
     /* read data from file if it exists */
-    if (file_name_.length() > 0) {
-        if (!Utils::file_exists(file_name_)) {
-            std::stringstream s;
-            s << "file " + file_name_ + " doesn't exist";
-            TERMINATE(s);
-        } else {
-            read_input(file_name_);
-        }
-    }
+    read_input(file_name_);
 
     /* check the nuclear charge */
     if (zn_ == 0) {
@@ -2054,10 +2047,13 @@ inline void Atom_type::read_pseudo_paw(json const& parser)
     }
 }
 
-inline void Atom_type::read_input(const std::string& fname)
+inline void Atom_type::read_input(std::string const& str__)
 {
-    json parser;
-    std::ifstream(fname) >> parser;
+    json parser = Utils::read_json_from_file_or_string(str__);
+
+    if (parser.empty()) {
+        return;
+    }
 
     if (!parameters_.full_potential()) {
         read_pseudo_uspp(parser);

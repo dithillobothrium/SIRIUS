@@ -115,6 +115,8 @@ class Simulation_context_base: public Simulation_parameters
 
         std::unique_ptr<Radial_integrals_aug<false>> aug_ri_;
 
+        std::unique_ptr<Radial_integrals_aug<true>> aug_ri_djl_;
+
         std::unique_ptr<Radial_integrals_atomic_wf> atomic_wf_ri_;
 
         std::vector<std::vector<std::pair<int, double>>> atoms_to_grid_idx_;
@@ -147,7 +149,6 @@ class Simulation_context_base: public Simulation_parameters
             gvec_coarse_partition_ = std::unique_ptr<Gvec_partition>(new Gvec_partition(*gvec_coarse_, comm_fft_coarse(), comm_ortho_fft_coarse()));
 
             /* create a list of G-vectors for dense FFT grid; G-vectors are divided between all available MPI ranks.*/
-            //gvec_ = std::unique_ptr<Gvec>(new Gvec(rlv, pw_cutoff(), comm(), control().reduce_gvec_));
             gvec_ = std::unique_ptr<Gvec>(new Gvec(pw_cutoff(), *gvec_coarse_));
 
             gvec_partition_ = std::unique_ptr<Gvec_partition>(new Gvec_partition(*gvec_, comm_fft(), comm_ortho_fft()));
@@ -554,6 +555,11 @@ class Simulation_context_base: public Simulation_parameters
             return *aug_ri_;
         }
 
+        inline Radial_integrals_aug<true> const& aug_ri_djl() const
+        {
+            return *aug_ri_djl_;
+        }
+
         inline Radial_integrals_atomic_wf const& atomic_wf_ri() const
         {
             return *atomic_wf_ri_;
@@ -590,6 +596,11 @@ class Simulation_context_base: public Simulation_parameters
         mdarray<double_complex, 3> const& sym_phase_factors() const
         {
             return sym_phase_factors_;
+        }
+
+        inline bool initialized() const
+        {
+            return initialized_;
         }
 };
 
@@ -674,6 +685,15 @@ inline void Simulation_context_base::initialize()
     /* find the cutoff for G+k vectors (derived from rgkmax (aw_cutoff here) and minimum MT radius) */
     if (full_potential()) {
         set_gk_cutoff(aw_cutoff() / unit_cell_.min_mt_radius());
+    }
+    
+    /* check the G+k cutoff */
+    if (gk_cutoff() * 2 > pw_cutoff()) {
+        std::stringstream s;
+        s << "G+k cutoff is too large for a given plane-wave cutoff" << std::endl
+          << "  pw cutoff : " << pw_cutoff() << std::endl
+          << "  doubled G+k cutoff : " << gk_cutoff() * 2;
+        TERMINATE(s);
     }
 
     if (!full_potential()) {
@@ -864,14 +884,18 @@ inline void Simulation_context_base::initialize()
 
         for (int iat = 0; iat < unit_cell_.num_atom_types(); iat++) {
             int nat = unit_cell_.atom_type(iat).num_atoms();
-            atom_coord_.push_back(std::move(mdarray<double, 2>(nat, 3, memory_t::host | memory_t::device)));
-            for (int i = 0; i < nat; i++) {
-                int ia = unit_cell_.atom_type(iat).atom_id(i);
-                for (int x: {0, 1, 2}) {
-                    atom_coord_.back()(i, x) = unit_cell_.atom(ia).position()[x];
+            if (nat > 0) {
+                atom_coord_.push_back(std::move(mdarray<double, 2>(nat, 3, memory_t::host | memory_t::device)));
+                for (int i = 0; i < nat; i++) {
+                    int ia = unit_cell_.atom_type(iat).atom_id(i);
+                    for (int x: {0, 1, 2}) {
+                        atom_coord_.back()(i, x) = unit_cell_.atom(ia).position()[x];
+                    }
                 }
+                atom_coord_.back().copy<memory_t::host, memory_t::device>();
+            } else {
+                atom_coord_.push_back(std::move(mdarray<double, 2>()));
             }
-            atom_coord_.back().copy<memory_t::host, memory_t::device>();
         }
     }
 
@@ -880,6 +904,7 @@ inline void Simulation_context_base::initialize()
         beta_ri_      = std::unique_ptr<Radial_integrals_beta<false>>(new Radial_integrals_beta<false>(unit_cell(), gk_cutoff() + 1, settings().nprii_beta_));
         beta_ri_djl_  = std::unique_ptr<Radial_integrals_beta<true>>(new Radial_integrals_beta<true>(unit_cell(), gk_cutoff() + 1, settings().nprii_beta_));
         aug_ri_       = std::unique_ptr<Radial_integrals_aug<false>>(new Radial_integrals_aug<false>(unit_cell(), pw_cutoff() + 1, settings().nprii_aug_));
+        aug_ri_djl_   = std::unique_ptr<Radial_integrals_aug<true>>(new Radial_integrals_aug<true>(unit_cell(), pw_cutoff() + 1, settings().nprii_aug_));
         atomic_wf_ri_ = std::unique_ptr<Radial_integrals_atomic_wf>(new Radial_integrals_atomic_wf(unit_cell(), gk_cutoff(), 20));
     }
 
